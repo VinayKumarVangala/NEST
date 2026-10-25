@@ -33,16 +33,7 @@ const isDev = process.env.NODE_ENV === 'development';
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
-
-// Initialize services
-const osAdapter = createOsAdapter();
-const eventBus = setupEventBus();
-let applicationManager: ApplicationManager;
-let portManager: PortManager;
-let healthMonitor: HealthMonitor;
-let networkManager: NetworkManager;
-let securityPolicyManager: SecurityPolicyManager;
-let diagnosticsService: DiagnosticsService;
+let trayNoticeShown = false;
 
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -127,6 +118,26 @@ async function createWindow(): Promise<void> {
         mainWindow?.hide();
         if (process.platform === 'darwin') {
           app.dock?.hide();
+        }
+        // Show one-time notice
+        if (!trayNoticeShown && !settings.trayNoticeDismissed) {
+          trayNoticeShown = true;
+          dialog
+            .showMessageBox(mainWindow!, {
+              type: 'info',
+              title: 'NEST running in background',
+              message:
+                'NEST has been minimized to the tray. Managed applications will continue running.',
+              detail: 'Click the tray icon to open NEST or manage running apps.',
+              buttons: ['OK'],
+              checkboxLabel: "Don't show this again",
+              checkboxChecked: false,
+            })
+            .then((result) => {
+              if (result.checkboxChecked) {
+                saveSettings({ trayNoticeDismissed: true });
+              }
+            });
         }
       }
     }
@@ -223,6 +234,16 @@ async function initializeApp(): Promise<void> {
   // Load settings
   const settings = loadSettings();
 
+  // Apply startup-at-login setting (Windows)
+  if (process.platform === 'win32') {
+    const openAtLogin = settings.startupAtLogin === true;
+    app.setLoginItemSettings({
+      openAtLogin,
+      path: process.execPath,
+      args: [],
+    });
+  }
+
   // Initialize services
   applicationManager = new ApplicationManager(osAdapter, eventBus, settings);
   portManager = new PortManager(osAdapter, eventBus);
@@ -272,29 +293,46 @@ async function initializeApp(): Promise<void> {
   app.on('before-quit', async (event) => {
     if (!isQuitting) {
       isQuitting = true;
-      const policy = settings.shutdownPolicy;
+      const currentSettings = loadSettings();
+      const policy = currentSettings.shutdownPolicy || 'ask';
+
       if (policy === 'ask') {
         event.preventDefault();
+
+        const runningApps = applicationManager.getAllRunningApps();
+        const appList = runningApps
+          .map((a) => `  • ${a.config.name} (port ${a.config.port})`)
+          .join('\n');
+
+        const message =
+          runningApps.length > 0
+            ? `Managed applications are still running:\n${appList}\n\nWhat would you like to do?`
+            : 'No managed applications are running. What would you like to do?';
+
         const response = await dialog.showMessageBox(mainWindow!, {
           type: 'question',
           title: 'NEST is running',
-          message: 'Managed applications are still running. What would you like to do?',
+          message,
           buttons: ['Stop All Apps & Exit', 'Keep Apps Running & Exit', 'Cancel'],
-          defaultId: 2,
+          defaultId: runningApps.length > 0 ? 0 : 2,
           checkboxLabel: 'Remember my choice',
           checkboxChecked: false,
         });
+
         if (response.response === 2) {
           isQuitting = false;
           return;
         }
+
         if (response.checkboxChecked) {
           const newPolicy = response.response === 0 ? 'stop_all' : 'keep_running';
-          saveSettings({ ...settings, shutdownPolicy: newPolicy });
+          saveSettings({ ...currentSettings, shutdownPolicy: newPolicy });
         }
+
         if (response.response === 0) {
           await applicationManager.stopAll();
         }
+        // If response.response === 1 (keep_running), do nothing - apps keep running
         app.quit();
       } else if (policy === 'stop_all') {
         await applicationManager.stopAll();
@@ -308,6 +346,16 @@ async function initializeApp(): Promise<void> {
     mainWindow?.webContents.send('theme-changed', nativeTheme.shouldUseDarkColors);
   });
 }
+
+// Initialize OS adapter after imports
+const osAdapter = createOsAdapter();
+const eventBus = setupEventBus();
+let applicationManager: ApplicationManager;
+let portManager: PortManager;
+let healthMonitor: HealthMonitor;
+let networkManager: NetworkManager;
+let securityPolicyManager: SecurityPolicyManager;
+let diagnosticsService: DiagnosticsService;
 
 app.whenReady().then(initializeApp).catch(console.error);
 
