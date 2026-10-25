@@ -1,17 +1,27 @@
 /**
  * Database connection, migrations, repositories
+ * WAL mode, foreign_keys ON. Secrets via Electron safeStorage.
  */
 import Database from 'better-sqlite3';
-import { app } from 'electron';
+import { app, safeStorage } from 'electron';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdirSync, existsSync } from 'node:fs';
+import type {
+  ApplicationConfig,
+  EnvVar,
+  RuntimeState,
+  AccessPolicy,
+  ActivityLogEntry,
+  HealthCheckConfig,
+  LaunchProfile,
+} from '@shared/types';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 let db: Database.Database | null = null;
 
-const MIGRATIONS = [
+const MIGRATIONS: string[] = [
   // 001_initial_schema
   `
   PRAGMA foreign_keys = ON;
@@ -114,7 +124,8 @@ export async function initializeDatabase(): Promise<void> {
   db.pragma('journal_mode = WAL');
 
   // Run migrations
-  const appliedMigrations = db.prepare('SELECT version FROM schema_migrations').all() as {
+  const dbInstance = db!;
+  const appliedMigrations = dbInstance.prepare('SELECT version FROM schema_migrations').all() as {
     version: number;
   }[];
   const appliedVersions = new Set(appliedMigrations.map((m) => m.version));
@@ -122,7 +133,10 @@ export async function initializeDatabase(): Promise<void> {
   for (let i = 0; i < MIGRATIONS.length; i++) {
     const version = i + 1;
     if (!appliedVersions.has(version)) {
-      db.exec(MIGRATIONS[i]);
+      const transaction = dbInstance.transaction(() => {
+        dbInstance.exec(MIGRATIONS[i]);
+      });
+      transaction();
       console.log(`[DB] Applied migration ${version}`);
     }
   }
@@ -156,9 +170,39 @@ export function closeDatabase(): void {
   }
 }
 
+// Secret encryption/decryption using Electron safeStorage
+function encryptSecret(value: string): string {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Encryption not available on this system');
+  }
+  return safeStorage.encryptString(value).toString('base64');
+}
+
+function decryptSecret(ciphertext: string): string {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Encryption not available on this system');
+  }
+  return safeStorage.decryptString(Buffer.from(ciphertext, 'base64'));
+}
+
+// Redact secret values for renderer
+function redactSecretsInEnv(env: EnvVar[]): EnvVar[] {
+  return env.map((e) => (e.secret ? { ...e, value: '••••' } : e));
+}
+
+// Decrypt secrets in env (for ApplicationManager launch path only)
+function decryptSecretsInEnv(env: EnvVar[]): EnvVar[] {
+  return env.map((e) => (e.secret ? { ...e, value: decryptSecret(e.value) } : e));
+}
+
 // Repository functions
 export const ApplicationRepository = {
-  create: (app: any) => {
+  create: (app: ApplicationConfig) => {
+    // Encrypt secrets before storing
+    const envForStorage = app.env.map((e) =>
+      e.secret ? { ...e, value: encryptSecret(e.value) } : e
+    );
+
     const stmt = db!.prepare(`
       INSERT INTO applications (id, name, project_path, runtime_label, executable, args, working_directory, env, protocol, port, expected_listen_address, lifecycle_mode, startup_timeout_ms, health_check, lan_launch_profile, selected_interface, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -171,7 +215,7 @@ export const ApplicationRepository = {
       app.executable,
       JSON.stringify(app.args),
       app.workingDirectory,
-      JSON.stringify(app.env),
+      JSON.stringify(envForStorage),
       app.protocol,
       app.port,
       app.expectedListenAddress,
@@ -183,19 +227,48 @@ export const ApplicationRepository = {
       app.createdAt,
       app.updatedAt
     );
+
+    // Create default access policy (local_only)
+    const now = Date.now();
+    db!
+      .prepare(`INSERT INTO access_policies (app_id, mode, updated_at) VALUES (?, 'local_only', ?)`)
+      .run(app.id, now);
+
+    // Create initial runtime state
+    db!
+      .prepare(
+        `INSERT INTO runtime_state (app_id, process_state, health_state, port_state, updated_at)
+       VALUES (?, 'registered', 'unknown', 'unknown', ?)`
+      )
+      .run(app.id, now);
   },
 
-  get: (id: string) => {
+  get: (id: string, options?: { decryptSecrets?: boolean }): ApplicationConfig | null => {
     const row = db!.prepare('SELECT * FROM applications WHERE id = ?').get(id);
-    return row ? mapRowToApplication(row) : null;
+    if (!row) return null;
+    const app = mapRowToApplication(row);
+    if (options?.decryptSecrets) {
+      app.env = decryptSecretsInEnv(app.env);
+    } else {
+      app.env = redactSecretsInEnv(app.env);
+    }
+    return app;
   },
 
-  list: () => {
+  list: (options?: { decryptSecrets?: boolean }): ApplicationConfig[] => {
     const rows = db!.prepare('SELECT * FROM applications ORDER BY created_at DESC').all();
-    return rows.map(mapRowToApplication);
+    return rows.map((row) => {
+      const app = mapRowToApplication(row);
+      if (options?.decryptSecrets) {
+        app.env = decryptSecretsInEnv(app.env);
+      } else {
+        app.env = redactSecretsInEnv(app.env);
+      }
+      return app;
+    });
   },
 
-  update: (id: string, updates: Partial<any>) => {
+  update: (id: string, updates: Partial<ApplicationConfig>) => {
     const fields: string[] = [];
     const values: any[] = [];
 
@@ -220,7 +293,13 @@ export const ApplicationRepository = {
     for (const [key, value] of Object.entries(updates)) {
       if (fieldMap[key]) {
         fields.push(`${fieldMap[key]} = ?`);
-        if (['args', 'env', 'healthCheck', 'lanLaunchProfile'].includes(key)) {
+        if (key === 'env') {
+          // Encrypt secrets before storing
+          const envForStorage = (value as EnvVar[]).map((e) =>
+            e.secret ? { ...e, value: encryptSecret(e.value) } : e
+          );
+          values.push(JSON.stringify(envForStorage));
+        } else if (['args', 'healthCheck', 'lanLaunchProfile'].includes(key)) {
           values.push(JSON.stringify(value));
         } else {
           values.push(value);
@@ -238,17 +317,23 @@ export const ApplicationRepository = {
   },
 
   delete: (id: string) => {
+    // CASCADE deletes runtime_state, access_policies due to FK
     db!.prepare('DELETE FROM applications WHERE id = ?').run(id);
+  },
+
+  // Get with decrypted secrets for ApplicationManager launch path
+  getForLaunch: (id: string): ApplicationConfig | null => {
+    return ApplicationRepository.get(id, { decryptSecrets: true });
   },
 };
 
 export const RuntimeStateRepository = {
-  get: (appId: string) => {
+  get: (appId: string): RuntimeState | null => {
     const row = db!.prepare('SELECT * FROM runtime_state WHERE app_id = ?').get(appId);
     return row ? mapRowToRuntimeState(row) : null;
   },
 
-  upsert: (state: any) => {
+  upsert: (state: RuntimeState) => {
     db!
       .prepare(
         `
@@ -290,12 +375,12 @@ export const RuntimeStateRepository = {
 };
 
 export const AccessPolicyRepository = {
-  get: (appId: string) => {
+  get: (appId: string): AccessPolicy | null => {
     const row = db!.prepare('SELECT * FROM access_policies WHERE app_id = ?').get(appId);
     return row ? mapRowToAccessPolicy(row) : null;
   },
 
-  upsert: (policy: any) => {
+  upsert: (policy: AccessPolicy) => {
     db!
       .prepare(
         `
@@ -321,14 +406,14 @@ export const AccessPolicyRepository = {
       );
   },
 
-  list: () => {
+  list: (): AccessPolicy[] => {
     const rows = db!.prepare('SELECT * FROM access_policies').all();
     return rows.map(mapRowToAccessPolicy);
   },
 };
 
 export const ActivityLogRepository = {
-  insert: (entry: any) => {
+  insert: (entry: ActivityLogEntry) => {
     db!
       .prepare(
         `
@@ -429,7 +514,7 @@ export const SettingsRepository = {
 };
 
 // Mappers
-function mapRowToApplication(row: any): any {
+function mapRowToApplication(row: any): ApplicationConfig {
   return {
     id: row.id,
     name: row.name,
@@ -452,7 +537,7 @@ function mapRowToApplication(row: any): any {
   };
 }
 
-function mapRowToRuntimeState(row: any): any {
+function mapRowToRuntimeState(row: any): RuntimeState {
   return {
     appId: row.app_id,
     processState: row.process_state,
@@ -469,7 +554,7 @@ function mapRowToRuntimeState(row: any): any {
   };
 }
 
-function mapRowToAccessPolicy(row: any): any {
+function mapRowToAccessPolicy(row: any): AccessPolicy {
   return {
     appId: row.app_id,
     mode: row.mode,
@@ -481,7 +566,7 @@ function mapRowToAccessPolicy(row: any): any {
   };
 }
 
-function mapRowToActivityLog(row: any): any {
+function mapRowToActivityLog(row: any): ActivityLogEntry {
   return {
     id: row.id,
     appId: row.app_id,
@@ -493,11 +578,11 @@ function mapRowToActivityLog(row: any): any {
   };
 }
 
-export function loadSettings(): any {
+export function loadSettings(): Record<string, any> {
   return SettingsRepository.get();
 }
 
-export function saveSettings(settings: Partial<any>): void {
+export function saveSettings(settings: Partial<Record<string, any>>): void {
   for (const [key, value] of Object.entries(settings)) {
     SettingsRepository.set(key, value);
   }
