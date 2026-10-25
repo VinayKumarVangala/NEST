@@ -348,6 +348,11 @@ export const RequestChannels = {
     RegisterExternalRequestSchema,
     makeResultSchema(ApplicationConfigSchema)
   ),
+  'apps.pickFolder': createChannel(
+    'apps.pickFolder',
+    z.void(),
+    makeResultSchema(z.object({ path: z.string().optional() }))
+  ),
 
   // Ports
   'ports.check': createChannel(
@@ -551,6 +556,7 @@ export interface NestAPI {
     }): Promise<Result<ApplicationConfig>>;
     lintLaunchConfig(config: ApplicationConfig): Promise<Result<LaunchConfigWarning[]>>;
     dummy(message: string): Promise<Result<{ echo: string; timestamp: number }>>;
+    pickFolder(): Promise<Result<{ path: string } | undefined>>;
   };
   ports: {
     check(port: number, host?: string): Promise<Result<PortInfo>>;

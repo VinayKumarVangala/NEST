@@ -17,6 +17,7 @@ import type {
   SystemInfo,
   ListenerInfo,
   LaunchConfigWarning,
+  EventChannelName,
 } from '@shared/ipc-contract';
 
 // Type-safe wrapper around window.nest
@@ -54,6 +55,7 @@ export const nest = {
       api.apps.lintLaunchConfig(config) as Promise<Result<LaunchConfigWarning[]>>,
     dummy: (message: string) =>
       api.apps.dummy(message) as Promise<Result<{ echo: string; timestamp: number }>>,
+    pickFolder: () => api.apps.pickFolder() as Promise<Result<{ path: string } | undefined>>,
   },
 
   ports: {
@@ -110,8 +112,8 @@ export const nest = {
     info: () => api.system.info() as Promise<Result<SystemInfo>>,
   },
 
-  on: <K extends keyof NestAPI['on']>(channel: K, callback: any) => api.on(channel, callback),
-  off: <K extends keyof NestAPI['off']>(channel: K, callback: any) => api.off(channel, callback),
+  on: <K extends EventChannelName>(channel: K, callback: any) => api.on(channel, callback),
+  off: <K extends EventChannelName>(channel: K, callback: any) => api.off(channel, callback),
 };
 
 // React hooks for IPC

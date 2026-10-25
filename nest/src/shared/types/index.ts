@@ -41,7 +41,7 @@ export type LifecycleMode = 'managed' | 'external';
 export type Protocol = 'http' | 'https';
 
 /** Expected listen address */
-export type ExpectedListenAddress = 'loopback' | 'all' | 'specific';
+export type ExpectedListenAddress = 'loopback' | 'all' | 'specific' | 'lan';
 
 /** Health check type */
 export type HealthCheckType = 'tcp' | 'http' | 'none';
@@ -237,6 +237,8 @@ export interface SystemInfo {
   nodeVersion: string;
   isElevated: boolean;
   userDataPath: string;
+  lanIp?: string;
+  networkProfile?: string;
 }
 
 /** Listener info */

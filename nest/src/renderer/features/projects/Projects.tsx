@@ -1,11 +1,15 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { nest } from '@renderer/lib/ipc';
-import type { ApplicationConfig, Result } from '@shared/ipc-contract';
+import type { ApplicationConfig } from '@shared/types';
+import { ConfirmDialog } from '@renderer/components/ConfirmDialog';
+import { RegistrationWizard } from '@renderer/components/RegistrationWizard';
+import { FolderPicker } from '@renderer/components/FolderPicker';
 
 export function Projects() {
   const queryClient = useQueryClient();
   const [showWizard, setShowWizard] = useState(false);
+  const [selectedAppForRemoval, setSelectedAppForRemoval] = useState<string | null>(null);
 
   const { data: apps, isLoading } = useQuery<ApplicationConfig[]>({
     queryKey: ['apps'],
@@ -27,7 +31,10 @@ export function Projects() {
 
   const removeMutation = useMutation({
     mutationFn: (id: string) => nest.apps.remove(id, false),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['apps'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['apps'] });
+      setSelectedAppForRemoval(null);
+    },
   });
 
   if (isLoading) {
@@ -54,6 +61,17 @@ export function Projects() {
         <RegistrationWizard onClose={() => setShowWizard(false)} onSubmit={createMutation.mutate} />
       )}
 
+      {selectedAppForRemoval && (
+        <ConfirmDialog
+          title="Remove Application"
+          message={`Are you sure you want to remove "${apps?.find((a) => a.id === selectedAppForRemoval)?.name}"?`}
+          details="Source files are NOT deleted. Only the NEST registration will be removed."
+          onConfirm={() => removeMutation.mutate(selectedAppForRemoval!)}
+          onCancel={() => setSelectedAppForRemoval(null)}
+          isPending={removeMutation.isPending}
+        />
+      )}
+
       <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
         {apps?.length === 0 ? (
           <div className="p-12 text-center">
@@ -62,13 +80,13 @@ export function Projects() {
               No applications registered
             </h3>
             <p className="text-slate-500 dark:text-slate-400 mb-4">
-              Click &apos;Register Application&apos; to get started
+              Click 'Register Application' to get started
             </p>
           </div>
         ) : (
           <div className="divide-y divide-slate-200 dark:divide-slate-700">
             {apps?.map((app) => (
-              <ProjectRow key={app.id} app={app} onRemove={removeMutation.mutate} />
+              <ProjectRow key={app.id} app={app} onRemove={setSelectedAppForRemoval} />
             ))}
           </div>
         )}
@@ -115,131 +133,6 @@ function ProjectRow({ app, onRemove }: { app: ApplicationConfig; onRemove: (id: 
             Remove
           </button>
         )}
-      </div>
-    </div>
-  );
-}
-
-function RegistrationWizard({
-  onClose,
-  onSubmit,
-}: {
-  onClose: () => void;
-  onSubmit: (config: any) => void;
-}) {
-  const [step, setStep] = useState(1);
-  const [formData, setFormData] = useState({
-    name: '',
-    projectPath: '',
-    executable: '',
-    args: '',
-    workingDirectory: '',
-    port: 3000,
-    protocol: 'http' as 'http' | 'https',
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSubmit({
-      ...formData,
-      args: formData.args.split(' ').filter(Boolean),
-      workingDirectory: formData.workingDirectory || formData.projectPath,
-      env: [],
-      expectedListenAddress: 'loopback',
-      lifecycleMode: 'managed',
-      startupTimeoutMs: 30000,
-      healthCheck: { type: 'none', intervalMs: 30000, timeoutMs: 5000, failureThreshold: 3 },
-    });
-  };
-
-  const steps = [
-    { title: 'Basics', fields: ['name', 'projectPath'] },
-    { title: 'Launch', fields: ['executable', 'args', 'workingDirectory'] },
-    { title: 'Port & Protocol', fields: ['port', 'protocol'] },
-  ];
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">
-            Register Application - Step {step} of {steps.length}
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-          >
-            ✕
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-4 space-y-4">
-          <div className="flex gap-2 mb-4">
-            {steps.map((s, i) => (
-              <button
-                key={s.title}
-                type="button"
-                onClick={() => setStep(i + 1)}
-                disabled={i + 1 > step + 1}
-                className={`px-3 py-1 text-sm rounded ${
-                  i + 1 === step
-                    ? 'bg-brand-600 text-white'
-                    : i + 1 < step
-                      ? 'bg-green-100 text-green-800'
-                      : 'bg-slate-100 text-slate-500 cursor-not-allowed'
-                }`}
-              >
-                {s.title}
-              </button>
-            ))}
-          </div>
-
-          {steps[step - 1].fields.map((field) => (
-            <div key={field}>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                {field}
-              </label>
-              <input
-                type={field === 'port' ? 'number' : 'text'}
-                value={formData[field as keyof typeof formData] || ''}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    [field]: field === 'port' ? parseInt(e.target.value) || 0 : e.target.value,
-                  })
-                }
-                className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
-                required
-              />
-            </div>
-          ))}
-
-          <div className="flex justify-end gap-2 pt-4 border-t border-slate-200 dark:border-slate-700">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
-            >
-              Cancel
-            </button>
-            {step < steps.length ? (
-              <button
-                type="button"
-                onClick={() => setStep(step + 1)}
-                className="px-4 py-2 bg-brand-600 text-white rounded hover:bg-brand-700"
-              >
-                Next
-              </button>
-            ) : (
-              <button
-                type="submit"
-                className="px-4 py-2 bg-brand-600 text-white rounded hover:bg-brand-700"
-              >
-                Register
-              </button>
-            )}
-          </div>
-        </form>
       </div>
     </div>
   );

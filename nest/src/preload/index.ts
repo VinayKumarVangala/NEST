@@ -32,6 +32,7 @@ const nestAPI: NestAPI = {
     registerExternal: (params) => invoke('apps.registerExternal', params),
     lintLaunchConfig: (config) => invoke('apps.lintLaunchConfig', { config }),
     dummy: (message: string) => invoke('test.dummy', { message }),
+    pickFolder: () => invoke('apps.pickFolder', undefined),
   },
   ports: {
     check: (port, host) => invoke('ports.check', { port, host }),

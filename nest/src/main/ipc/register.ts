@@ -159,6 +159,15 @@ export function registerHandlers(
     return warnings;
   });
 
+  createHandler('apps.pickFolder', async () => {
+    const { dialog } = await import('electron');
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+    if (result.canceled || result.filePaths.length === 0) {
+      return { path: undefined };
+    }
+    return { path: result.filePaths[0] };
+  });
+
   // Dummy channel for integration testing
   createHandler('test.dummy', async ({ message }: { message: string }) => {
     return { echo: `Server received: ${message}`, timestamp: Date.now() };
