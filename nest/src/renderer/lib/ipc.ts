@@ -1,6 +1,8 @@
 /**
  * IPC Client - Typed client for renderer to communicate with main process
  */
+import { useCallback, useEffect, useRef } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type {
   NestAPI,
   Result,
@@ -50,6 +52,8 @@ export const nest = {
     }) => api.apps.registerExternal(params) as Promise<Result<ApplicationConfig>>,
     lintLaunchConfig: (config: ApplicationConfig) =>
       api.apps.lintLaunchConfig(config) as Promise<Result<LaunchConfigWarning[]>>,
+    dummy: (message: string) =>
+      api.apps.dummy(message) as Promise<Result<{ echo: string; timestamp: number }>>,
   },
 
   ports: {
@@ -111,19 +115,75 @@ export const nest = {
 };
 
 // React hooks for IPC
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+/** Generic query hook for IPC calls */
+export function useIpcQuery<TResult, TError = Error>(
+  queryKey: readonly unknown[],
+  queryFn: () => Promise<Result<TResult>>,
+  options?: {
+    enabled?: boolean;
+    staleTime?: number;
+    refetchInterval?: number;
+  }
+) {
+  return useQuery({
+    queryKey,
+    queryFn: async () => {
+      const result = await queryFn();
+      if (!result.ok) {
+        throw new Error(result.error.message);
+      }
+      return result.data;
+    },
+    enabled: options?.enabled ?? true,
+    staleTime: options?.staleTime,
+    refetchInterval: options?.refetchInterval,
+  });
+}
 
+/** Generic mutation hook for IPC calls */
+export function useIpcMutation<TVariables, TResult, TError = Error>(
+  mutationFn: (variables: TVariables) => Promise<Result<TResult>>,
+  options?: {
+    onSuccess?: (data: TResult, variables: TVariables) => void;
+    onError?: (error: TError, variables: TVariables) => void;
+    onSettled?: (data: TResult | undefined, error: TError | null, variables: TVariables) => void;
+  }
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (variables: TVariables) => {
+      const result = await mutationFn(variables);
+      if (!result.ok) {
+        throw new Error(result.error.message);
+      }
+      return result.data;
+    },
+    onSuccess: options?.onSuccess,
+    onError: options?.onError,
+    onSettled: options?.onSettled,
+  });
+}
+
+/** Pre-built hooks for common operations */
 export function useApps() {
   return useQuery({
     queryKey: ['apps'],
-    queryFn: () => nest.apps.list(),
+    queryFn: async () => {
+      const result = await nest.apps.list();
+      if (!result.ok) throw new Error(result.error.message);
+      return result.data;
+    },
   });
 }
 
 export function useApp(id: string) {
   return useQuery({
     queryKey: ['apps', id],
-    queryFn: () => nest.apps.get(id),
+    queryFn: async () => {
+      const result = await nest.apps.get(id);
+      if (!result.ok) throw new Error(result.error.message);
+      return result.data;
+    },
     enabled: !!id,
   });
 }
@@ -131,7 +191,12 @@ export function useApp(id: string) {
 export function useStartApp() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => nest.apps.start(id),
+    mutationFn: (id: string) => {
+      return nest.apps.start(id).then((result) => {
+        if (!result.ok) throw new Error(result.error.message);
+        return result.data;
+      });
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['apps'] }),
   });
 }
@@ -139,7 +204,12 @@ export function useStartApp() {
 export function useStopApp() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => nest.apps.stop(id),
+    mutationFn: (id: string) => {
+      return nest.apps.stop(id).then((result) => {
+        if (!result.ok) throw new Error(result.error.message);
+        return result.data;
+      });
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['apps'] }),
   });
 }
@@ -147,7 +217,12 @@ export function useStopApp() {
 export function useRestartApp() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => nest.apps.restart(id),
+    mutationFn: (id: string) => {
+      return nest.apps.restart(id).then((result) => {
+        if (!result.ok) throw new Error(result.error.message);
+        return result.data;
+      });
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['apps'] }),
   });
 }
@@ -155,27 +230,43 @@ export function useRestartApp() {
 export function useInterfaces() {
   return useQuery({
     queryKey: ['interfaces'],
-    queryFn: () => nest.network.listInterfaces(),
+    queryFn: async () => {
+      const result = await nest.network.listInterfaces();
+      if (!result.ok) throw new Error(result.error.message);
+      return result.data;
+    },
   });
 }
 
 export function useLogs(filters: any) {
   return useQuery({
     queryKey: ['logs', filters],
-    queryFn: () => nest.logs.query(filters),
+    queryFn: async () => {
+      const result = await nest.logs.query(filters);
+      if (!result.ok) throw new Error(result.error.message);
+      return result.data;
+    },
   });
 }
 
 export function useSettings() {
   return useQuery({
     queryKey: ['settings'],
-    queryFn: () => nest.settings.get(),
+    queryFn: async () => {
+      const result = await nest.settings.get();
+      if (!result.ok) throw new Error(result.error.message);
+      return result.data;
+    },
   });
 }
 
 export function useSystemInfo() {
   return useQuery({
     queryKey: ['systemInfo'],
-    queryFn: () => nest.system.info(),
+    queryFn: async () => {
+      const result = await nest.system.info();
+      if (!result.ok) throw new Error(result.error.message);
+      return result.data;
+    },
   });
 }

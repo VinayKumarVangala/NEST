@@ -31,6 +31,7 @@ const nestAPI: NestAPI = {
     restart: (id) => invoke('apps.restart', { id }),
     registerExternal: (params) => invoke('apps.registerExternal', params),
     lintLaunchConfig: (config) => invoke('apps.lintLaunchConfig', { config }),
+    dummy: (message: string) => invoke('test.dummy', { message }),
   },
   ports: {
     check: (port, host) => invoke('ports.check', { port, host }),

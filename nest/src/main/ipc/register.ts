@@ -5,7 +5,7 @@ import { ipcMain, IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import type { Result, AppError } from '@shared/types';
 import type { RequestChannelName } from '@shared/ipc-contract';
-import { RequestChannels, EventChannels, isValidChannel } from '@shared/ipc-contract';
+import { RequestChannels } from '@shared/ipc-contract';
 
 export interface IPCServices {
   applicationManager: any;
@@ -20,9 +20,19 @@ export interface IPCServices {
   saveSettings: (settings: Partial<any>) => void;
 }
 
+/** Expected renderer frame origin for validation */
+const EXPECTED_RENDERER_ORIGIN = 'file://';
+
 /** Validate event sender is our own renderer */
 function validateSender(event: IpcMainInvokeEvent): boolean {
-  return true;
+  const sender = event.senderFrame;
+  if (!sender) return false;
+  try {
+    const origin = new URL(sender.url).origin;
+    return origin === EXPECTED_RENDERER_ORIGIN || origin === 'http://localhost:5173';
+  } catch {
+    return false;
+  }
 }
 
 /** Create a standardized error response */
@@ -45,55 +55,53 @@ export function registerHandlers(
   ) => {
     const { requestSchema, responseSchema } = RequestChannels[channel];
 
-    ipcMain.handle(channel, async (event, payload: unknown): Promise<Result<TResponse>> => {
-      if (!validateSender(event)) {
-        return { ok: false, error: createError('VALIDATION', 'Invalid sender') };
-      }
-
-      const parseResult = requestSchema.safeParse(payload);
-      if (!parseResult.success) {
-        return {
-          ok: false,
-          error: createError('VALIDATION', 'Invalid request payload', {
-            issues: parseResult.error.flatten().fieldErrors,
-          }),
-        };
-      }
-
-      try {
-        const data = await handler(parseResult.data as TRequest, services);
-
-        if (process.env.NODE_ENV === 'development') {
-          const responseParse = responseSchema.safeParse({ ok: true, data });
-          if (!responseParse.success) {
-            console.error(`[IPC] Response validation failed for ${channel}:`, responseParse.error);
-          }
+    ipcMain.handle(
+      channel,
+      async (event, payload: unknown): Promise<import('@shared/types').Result<any>> => {
+        // Validate sender frame origin
+        if (!validateSender(event)) {
+          return { ok: false, error: createError('VALIDATION', 'Invalid sender origin') };
         }
 
-        return { ok: true, data };
-      } catch (error) {
-        console.error(`[IPC] Handler error for ${channel}:`, error);
-        return {
-          ok: false,
-          error: createError('INTERNAL', error instanceof Error ? error.message : 'Unknown error'),
-        };
+        // Validate request payload
+        const parseResult = requestSchema.safeParse(payload);
+        if (!parseResult.success) {
+          return {
+            ok: false,
+            error: createError('VALIDATION', 'Invalid request payload', {
+              issues: parseResult.error.flatten().fieldErrors,
+            }),
+          };
+        }
+
+        try {
+          const data = await handler(parseResult.data as any, services);
+
+          // Validate response in development mode
+          if (process.env.NODE_ENV === 'development') {
+            const responseParse = responseSchema.safeParse({ ok: true, data });
+            if (!responseParse.success) {
+              console.error(
+                `[IPC] Response validation failed for ${channel}:`,
+                responseParse.error
+              );
+            }
+          }
+
+          return { ok: true, data };
+        } catch (error) {
+          console.error(`[IPC] Handler error for ${channel}:`, error);
+          return {
+            ok: false,
+            error: createError(
+              'INTERNAL',
+              error instanceof Error ? error.message : 'Unknown error'
+            ),
+          };
+        }
       }
-    });
+    );
   };
-
-  /** Create a standardized error response */
-  function createError(
-    code: AppError['code'],
-    message: string,
-    details?: Record<string, unknown>
-  ): AppError {
-    return { code, message, details };
-  }
-
-  /** Validate event sender is our own renderer */
-  function validateSender(event: IpcMainInvokeEvent): boolean {
-    return true;
-  }
 
   // Applications
   createHandler('apps.list', async () => {
@@ -149,6 +157,11 @@ export function registerHandlers(
   createHandler('apps.lintLaunchConfig', async ({ config }: { config: any }) => {
     const warnings = services.applicationManager.lintLaunchConfig(config);
     return warnings;
+  });
+
+  // Dummy channel for integration testing
+  createHandler('test.dummy', async ({ message }: { message: string }) => {
+    return { echo: `Server received: ${message}`, timestamp: Date.now() };
   });
 
   // Ports

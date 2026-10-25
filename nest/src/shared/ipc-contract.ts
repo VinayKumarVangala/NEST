@@ -194,6 +194,15 @@ const LintLaunchConfigRequestSchema = z.object({
   config: ApplicationConfigSchema,
 });
 
+const DummyRequestSchema = z.object({
+  message: z.string(),
+});
+
+const DummyResponseSchema = z.object({
+  echo: z.string(),
+  timestamp: z.number().int().positive(),
+});
+
 /** Result schema factory */
 const makeResultSchema = <T extends z.ZodTypeAny>(dataSchema: T) =>
   z.union([
@@ -465,6 +474,13 @@ export const RequestChannels = {
   // System
   'system.info': createChannel('system.info', z.void(), makeResultSchema(SystemInfoSchema)),
 
+  // Test dummy channel
+  'test.dummy': createChannel(
+    'test.dummy',
+    DummyRequestSchema,
+    makeResultSchema(DummyResponseSchema)
+  ),
+
   // Launch config linting
   'apps.lintLaunchConfig': createChannel(
     'apps.lintLaunchConfig',
@@ -534,6 +550,7 @@ export interface NestAPI {
       selectedInterface?: string;
     }): Promise<Result<ApplicationConfig>>;
     lintLaunchConfig(config: ApplicationConfig): Promise<Result<LaunchConfigWarning[]>>;
+    dummy(message: string): Promise<Result<{ echo: string; timestamp: number }>>;
   };
   ports: {
     check(port: number, host?: string): Promise<Result<PortInfo>>;
