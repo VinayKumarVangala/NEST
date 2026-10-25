@@ -51,7 +51,9 @@ interface NetConnectionProfile {
 }
 
 export class WindowsAdapter implements OsAdapter {
-  private static readonly METACHAR_REGEX = /[&|<>^%!"]/;
+  /** Shell metacharacters that are dangerous in cmd.exe context */
+  private static readonly METACHAR_REGEX = /[&|<>^%!"\n\r]/;
+  /** Windows command script extensions that require cmd.exe */
   private static readonly CMD_EXTS = ['.cmd', '.bat'];
 
   async resolveExecutable(nameOrPath: string): Promise<ResolvedExecutable | null> {
@@ -77,8 +79,7 @@ export class WindowsAdapter implements OsAdapter {
     const isCmd = WindowsAdapter.CMD_EXTS.some((ext) => absPath.toLowerCase().endsWith(ext));
 
     if (isCmd) {
-      // For .cmd/.bat, we need to spawn via cmd.exe
-      // But first validate no metacharacters in the path itself
+      // For .cmd/.bat, validate no metacharacters in the path itself
       if (WindowsAdapter.METACHAR_REGEX.test(absPath)) {
         throw new Error(`Path contains shell metacharacters: ${absPath}`);
       }
@@ -139,16 +140,45 @@ export class WindowsAdapter implements OsAdapter {
     return null;
   }
 
+  /**
+   * Validate arguments for cmd.exe execution.
+   * Throws if args contain shell metacharacters when using cmd.exe route.
+   */
+  private validateArgsForCmd(args: string[]): void {
+    for (const arg of args) {
+      if (WindowsAdapter.METACHAR_REGEX.test(arg)) {
+        throw new Error(`Argument contains shell metacharacters (not allowed with .cmd/.bat): ${arg}`);
+      }
+      if (arg.includes('\n') || arg.includes('\r')) {
+        throw new Error('Argument contains newline characters');
+      }
+    }
+  }
+
   async spawnProcess(spec: {
     executable: string;
     args: string[];
     workingDirectory: string;
     env: Record<string, string>;
   }): Promise<{ pid: number; startTime: number; child: ChildProcess }> {
+    // Resolve the executable first to handle .cmd/.bat properly
+    const resolved = await this.resolveExecutable(spec.executable);
+    if (!resolved) {
+      throw new Error(`Executable not found: ${spec.executable}`);
+    }
+
+    // If using cmd.exe for .cmd/.bat, validate args for metacharacters
+    if (resolved.isCmd) {
+      this.validateArgsForCmd(spec.args);
+    }
+
+    const finalExecutable = resolved.path;
+    const finalArgs = resolved.isCmd ? [...resolved.args, ...spec.args] : spec.args;
+
     const startTime = Date.now();
 
     return new Promise((resolvePromise, reject) => {
-      const child = spawn(spec.executable, spec.args, {
+      const child = spawn(finalExecutable, finalArgs, {
         cwd: spec.workingDirectory,
         env: { ...process.env, ...spec.env },
         windowsHide: true,
@@ -315,35 +345,12 @@ export class WindowsAdapter implements OsAdapter {
 
           let type: NetworkInterfaceInfo['type'] = 'Other';
           const desc = config.InterfaceDescription.toLowerCase();
-          if (desc.includes('wi-fi') || desc.includes('wireless') || desc.includes('802.11'))
-            type = 'WiFi';
-          else if (
-            desc.includes('ethernet') &&
-            !desc.includes('virtual') &&
-            !desc.includes('vmware') &&
-            !desc.includes('hyper-v')
-          )
-            type = 'Ethernet';
-          else if (
-            desc.includes('vpn') ||
-            desc.includes('tap') ||
-            desc.includes('tun') ||
-            desc.includes('wintun') ||
-            desc.includes('openvpn') ||
-            desc.includes('wireguard')
-          )
-            type = 'VPN';
-          else if (
-            desc.includes('virtual') ||
-            desc.includes('vmware') ||
-            desc.includes('hyper-v') ||
-            desc.includes('docker') ||
-            desc.includes('veth')
-          )
-            type = 'Virtual';
+          if (desc.includes('wi-fi') || desc.includes('wireless') || desc.includes('802.11')) type = 'WiFi';
+          else if (desc.includes('ethernet') && !desc.includes('virtual') && !desc.includes('vmware') && !desc.includes('hyper-v')) type = 'Ethernet';
+          else if (desc.includes('vpn') || desc.includes('tap') || desc.includes('tun') || desc.includes('wintun') || desc.includes('openvpn') || desc.includes('wireguard')) type = 'VPN';
+          else if (desc.includes('virtual') || desc.includes('vmware') || desc.includes('hyper-v') || desc.includes('docker') || desc.includes('veth')) type = 'Virtual';
 
-          const networkProfile =
-            (profileMap.get(config.InterfaceAlias) as NetworkProfile) || 'Unknown';
+          const networkProfile = (profileMap.get(config.InterfaceAlias) as NetworkProfile) || 'Unknown';
           const isRecommended = type === 'Ethernet' || type === 'WiFi';
 
           interfaces.push({
