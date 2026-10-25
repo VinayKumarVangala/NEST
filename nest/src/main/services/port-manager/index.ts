@@ -12,7 +12,22 @@ import type {
   Result,
   AppError,
 } from '@shared/types';
-import { PortGuard, NoOpPortGuardImpl } from '../application-manager';
+
+/**
+ * PortGuard interface for Phase 2 integration
+ */
+export interface PortGuard {
+  checkPort(port: number): Promise<{ available: boolean; error?: string }>;
+}
+
+/**
+ * No-op PortGuard for Phase 1
+ */
+export class NoOpPortGuardImpl implements PortGuard {
+  async checkPort(_port: number): Promise<{ available: boolean; error?: string }> {
+    return { available: true };
+  }
+}
 
 /**
  * Extended listener info with owner process details
@@ -410,6 +425,120 @@ export class PortManager extends EventEmitter {
       success: false,
       error: `Process did not start listening on port ${port} within ${timeoutMs}ms`,
     };
+  }
+
+  /**
+   * Inspect a port for external registration
+   * Returns detailed info about the listener and tests connectivity
+   */
+  async inspectPort(
+    port: number,
+    healthCheck: {
+      type: 'tcp' | 'http' | 'https';
+      path?: string;
+      expectedStatus?: number;
+      expectedBodyContains?: string;
+      timeoutMs?: number;
+    }
+  ): Promise<{
+    listener: ListenerInfoWithOwner | null;
+    connectivity: { success: boolean; error?: string; latencyMs?: number };
+  }> {
+    const listeners = await this.osAdapter.listTcpListeners();
+    const listener = listeners.find((l: ListenerInfo) => l.localPort === port);
+
+    if (!listener) {
+      return {
+        listener: null,
+        connectivity: { success: false, error: 'No listener found on port' },
+      };
+    }
+
+    // Get owner process info
+    const ownerInfo = await this.getProcessInfoSafe(listener.pid);
+    const managedAppId = this.registeredAppPorts.get(port);
+
+    const listenerWithOwner: ListenerInfoWithOwner = {
+      ...listener,
+      ownerImage: ownerInfo?.imageName,
+      ownedByManagedAppId: managedAppId,
+    };
+
+    // Test connectivity based on health check type
+    let connectivity: { success: boolean; error?: string; latencyMs?: number } = {
+      success: false,
+      error: 'Unknown check type',
+    };
+
+    if (healthCheck.type === 'tcp') {
+      const start = Date.now();
+      try {
+        const server = net.createServer();
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(
+            () => reject(new Error('TCP connect timeout')),
+            healthCheck.timeoutMs || 5000
+          );
+          server.once('error', (err) => {
+            clearTimeout(timeout);
+            reject(err);
+          });
+          server.once('listening', () => {
+            clearTimeout(timeout);
+            server.close(() => resolve());
+          });
+          server.listen(port, '127.0.0.1');
+        });
+        connectivity = { success: true, latencyMs: Date.now() - start };
+      } catch (err) {
+        connectivity = {
+          success: false,
+          error: err instanceof Error ? err.message : 'TCP connect failed',
+        };
+      }
+    } else if (healthCheck.type === 'http' || healthCheck.type === 'https') {
+      const protocol = healthCheck.type;
+      const path = healthCheck.path || '/health';
+      const baseUrl = `${protocol}://localhost:${port}`;
+      const url = `${baseUrl}${path}`;
+
+      const start = Date.now();
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), healthCheck.timeoutMs || 5000);
+
+        const response = await fetch(url, {
+          method: 'GET',
+          redirect: 'manual',
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        let success = response.ok;
+        if (healthCheck.expectedStatus && response.status !== healthCheck.expectedStatus) {
+          success = false;
+        }
+        if (healthCheck.expectedBodyContains) {
+          const text = await response.text();
+          success = success && text.includes(healthCheck.expectedBodyContains);
+        }
+
+        connectivity = { success, latencyMs: Date.now() - start };
+        if (!success) {
+          connectivity.error = `HTTP ${response.status}${healthCheck.expectedStatus ? ` (expected ${healthCheck.expectedStatus})` : ''}`;
+        }
+      } catch (err) {
+        connectivity = {
+          success: false,
+          error: err instanceof Error ? err.message : 'HTTP check failed',
+        };
+      }
+    } else {
+      connectivity = { success: true, latencyMs: 0 }; // 'none' type - assume healthy
+    }
+
+    return { listener: listenerWithOwner, connectivity };
   }
 
   /**

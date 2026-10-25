@@ -245,8 +245,15 @@ async function initializeApp(): Promise<void> {
   }
 
   // Initialize services
-  applicationManager = new ApplicationManager(osAdapter, eventBus, settings);
-  portManager = new PortManager(osAdapter, eventBus);
+  applicationManager = new ApplicationManager(
+    osAdapter,
+    eventBus,
+    settings,
+    undefined,
+    undefined,
+    portManager
+  );
+  portManager = new PortManager(osAdapter, eventBus, applicationManager);
   healthMonitor = new HealthMonitor(osAdapter, eventBus, applicationManager);
   networkManager = new NetworkManager(osAdapter, eventBus);
   securityPolicyManager = new SecurityPolicyManager(
@@ -285,12 +292,18 @@ async function initializeApp(): Promise<void> {
   // Startup recovery
   await applicationManager.recover();
 
+  // Start external app monitoring
+  applicationManager.startExternalMonitoring();
+
   // Start monitors
   healthMonitor.start();
   networkManager.start();
 
   // Handle shutdown policy
   app.on('before-quit', async (event) => {
+    // Stop external monitoring
+    applicationManager.stopExternalMonitoring();
+
     if (!isQuitting) {
       isQuitting = true;
       const currentSettings = loadSettings();

@@ -6,11 +6,13 @@ import type {
   ProcessState,
   HealthState,
   HealthCheckResult,
+  HealthCheckConfig,
   PortInfo,
 } from '@shared/types';
 import type { ErrorCode } from '@shared/types';
 import { ApplicationRepository, RuntimeStateRepository, ActivityLogRepository } from '../../db';
 import { lintLaunchConfig } from '@shared/schemas';
+import { PortGuard, NoOpPortGuardImpl } from '../port-manager';
 
 // State machine transition validation
 const VALID_TRANSITIONS: Record<ProcessState, ProcessState[]> = {
@@ -24,20 +26,8 @@ const VALID_TRANSITIONS: Record<ProcessState, ProcessState[]> = {
   unknown: ['starting', 'stopped', 'failed'],
 };
 
-// Valid terminal states that don't transition (for documentation)
+// Valid terminal states that don't transition
 // const TERMINAL_STATES: ProcessState[] = ['stopped', 'failed', 'external'];
-
-/** PortGuard interface for Phase 2 integration */
-export interface PortGuard {
-  checkPort(port: number): Promise<{ available: boolean; error?: string }>;
-}
-
-/** No-op PortGuard for Phase 1 */
-export class NoOpPortGuardImpl implements PortGuard {
-  async checkPort(_port: number): Promise<{ available: boolean; error?: string }> {
-    return { available: true };
-  }
-}
 
 /** Per-app mutex for single-flight operations */
 class AppMutex {
@@ -86,15 +76,18 @@ export class ApplicationManager {
   private startLocks: Map<string, Promise<RuntimeState>> = new Map();
   private portGuard: PortGuard;
   private healthMonitor: any;
+  private portManager: any;
   private mutex = new AppMutex();
   private isQuitting = false;
+  private externalMonitorInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     osAdapter: any,
     eventBus: any,
     settings: any,
     portGuard: PortGuard = new NoOpPortGuardImpl(),
-    healthMonitor: any = null
+    healthMonitor: any = null,
+    portManager: any = null
   ) {
     this.osAdapter = osAdapter;
     this.eventBus = eventBus;
@@ -109,6 +102,7 @@ export class ApplicationManager {
     };
     this.portGuard = portGuard;
     this.healthMonitor = healthMonitor;
+    this.portManager = portManager;
   }
 
   private validateTransition(from: ProcessState, to: ProcessState): void {
@@ -161,6 +155,10 @@ export class ApplicationManager {
   }
 
   async start(id: string): Promise<any> {
+    const app = await this.getApplication(id);
+    if (app?.lifecycleMode === 'external') {
+      throw this.createError('UNSUPPORTED_OPERATION', 'Start is unavailable — not managed by NEST');
+    }
     return this.mutex.acquire(id, () => this.doStart(id));
   }
 
@@ -305,7 +303,7 @@ export class ApplicationManager {
     return { port, state: 'occupied_by_managed', boundAddress: '127.0.0.1' };
   }
 
-  private async checkHealth(_app: any): Promise<HealthCheckResult> {
+  private async checkHealth(app: any): Promise<HealthCheckResult> {
     // Delegate to health monitor
     return {
       timestamp: Date.now(),
@@ -352,7 +350,6 @@ export class ApplicationManager {
   }
 
   private redactSecrets(text: string): string {
-    // Redact common secret patterns
     return text
       .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/g, 'Bearer ••••')
       .replace(/password\s*=\s*[^\s]+/gi, 'password=••••')
@@ -388,6 +385,10 @@ export class ApplicationManager {
   }
 
   async stop(id: string, force = false): Promise<any> {
+    const app = await this.getApplication(id);
+    if (app?.lifecycleMode === 'external') {
+      throw this.createError('UNSUPPORTED_OPERATION', 'Stop is unavailable — not managed by NEST');
+    }
     return this.mutex.acquire(id, async () => {
       const state = RuntimeStateRepository.get(id);
       if (!state) throw this.createError('NOT_FOUND', 'Application not found');
@@ -434,6 +435,13 @@ export class ApplicationManager {
   }
 
   async restart(id: string): Promise<any> {
+    const app = await this.getApplication(id);
+    if (app?.lifecycleMode === 'external') {
+      throw this.createError(
+        'UNSUPPORTED_OPERATION',
+        'Restart is unavailable — not managed by NEST'
+      );
+    }
     // Use mutex to ensure single-flight restart
     return this.mutex.acquire(id, async () => {
       await this.stop(id);
@@ -442,6 +450,41 @@ export class ApplicationManager {
   }
 
   async registerExternal(params: any): Promise<any> {
+    const port = params.port;
+    const protocol = params.protocol || 'http';
+    const healthCheck = params.healthCheck || {
+      type: 'tcp',
+      intervalMs: 30000,
+      timeoutMs: 5000,
+      failureThreshold: 3,
+    };
+
+    // Inspect the port using PortManager
+    const inspection = await this.portManager.inspectPort(port, {
+      type: healthCheck.type,
+      path: healthCheck.path,
+      expectedStatus: healthCheck.expectedStatus,
+      expectedBodyContains: healthCheck.expectedBodyContains,
+      timeoutMs: healthCheck.timeoutMs,
+    });
+
+    if (!inspection.listener) {
+      throw this.createError('NOT_FOUND', `No listener found on port ${port}`);
+    }
+
+    // Check connectivity
+    if (!inspection.connectivity.success) {
+      throw this.createError(
+        'NOT_FOUND',
+        `Cannot connect to port ${port}: ${inspection.connectivity.error}`
+      );
+    }
+
+    // Get owner process info
+    const ownerPid = inspection.listener.pid;
+    const ownerImage = inspection.listener.ownerImage;
+
+    // Create the application
     const app = await this.createApplication({
       name: params.name,
       projectPath: '',
@@ -449,29 +492,36 @@ export class ApplicationManager {
       args: [],
       workingDirectory: '',
       env: [],
-      protocol: params.protocol,
-      port: params.port,
+      protocol: params.protocol || 'http',
+      port: port,
       expectedListenAddress: 'all',
       lifecycleMode: 'external',
       startupTimeoutMs: 5000,
-      healthCheck: params.healthCheck || {
-        type: 'tcp',
-        intervalMs: 30000,
-        timeoutMs: 5000,
-        failureThreshold: 3,
-      },
+      healthCheck: healthCheck,
       selectedInterface: params.selectedInterface,
     });
 
-    // Update runtime state to external
+    // Update runtime state to external with owner PID
     RuntimeStateRepository.upsert({
       appId: app.id,
       processState: 'external',
       healthState: 'unknown',
       portState: 'unknown',
+      pid: ownerPid,
+      processStartTime: Date.now(), // We don't know the actual start time, use now
       updatedAt: Date.now(),
     });
     this.emitStateChange(app.id, 'external', 'unknown');
+
+    // Start health monitoring for external app
+    this.healthMonitor.startCheckForApp(app.id);
+
+    // Log the registration
+    this.emitAppLog(
+      app.id,
+      'info',
+      `Registered external app on port ${port} (PID: ${ownerPid}, Process: ${ownerImage || 'unknown'})`
+    );
 
     return app;
   }
@@ -482,7 +532,60 @@ export class ApplicationManager {
       const state = RuntimeStateRepository.get(app.id);
       if (!state || !state.pid || !state.processStartTime) continue;
 
-      // Verify PID ownership
+      // Handle external apps differently
+      if (app.lifecycleMode === 'external') {
+        // For external apps, check if the listener still exists
+        const inspection = await this.portManager.inspectPort(app.port, {
+          type: app.healthCheck.type,
+          path: app.healthCheck.path,
+          expectedStatus: app.healthCheck.expectedStatus,
+          expectedBodyContains: app.healthCheck.expectedBodyContains,
+          timeoutMs: app.healthCheck.timeoutMs,
+        });
+
+        if (inspection.listener) {
+          // Listener still exists, update PID if changed
+          const ownerPid = inspection.listener.pid;
+          const ownerImage = inspection.listener.ownerImage;
+
+          const updatedState: RuntimeState = {
+            ...state,
+            processState: 'external',
+            healthState: 'unknown',
+            portState: 'unknown',
+            pid: ownerPid,
+            processStartTime: Date.now(),
+            updatedAt: Date.now(),
+          };
+          RuntimeStateRepository.upsert(updatedState);
+          this.emitStateChange(app.id, 'external', 'unknown');
+
+          // Restart health monitoring
+          this.healthMonitor.startCheckForApp(app.id);
+
+          this.emitAppLog(
+            app.id,
+            'info',
+            `Re-adopted external app on port ${app.port} (PID: ${ownerPid})`
+          );
+        } else {
+          // Listener disappeared
+          const updatedState: RuntimeState = {
+            ...state,
+            processState: 'stopped',
+            healthState: 'unknown',
+            portState: 'unknown',
+            lastError: 'External listener disappeared',
+            updatedAt: Date.now(),
+          };
+          RuntimeStateRepository.upsert(updatedState);
+          this.emitStateChange(app.id, 'stopped', 'unknown');
+          this.emitAppLog(app.id, 'warn', `External app on port ${app.port} listener disappeared`);
+        }
+        continue;
+      }
+
+      // Verify PID ownership for managed apps
       const processInfo = await this.osAdapter.getProcessInfo(state.pid);
       if (processInfo && processInfo.startTime === state.processStartTime) {
         // Re-adopt
@@ -506,6 +609,81 @@ export class ApplicationManager {
         };
         RuntimeStateRepository.upsert(updatedState);
       }
+    }
+  }
+
+  /**
+   * Start periodic monitoring for external apps
+   * Checks every 30 seconds if external listeners are still present
+   */
+  startExternalMonitoring(): void {
+    if (this.externalMonitorInterval) {
+      return;
+    }
+    this.externalMonitorInterval = setInterval(async () => {
+      try {
+        const apps = await this.listApplications();
+        for (const app of apps) {
+          if (app.lifecycleMode !== 'external') continue;
+
+          const state = RuntimeStateRepository.get(app.id);
+          if (!state || state.processState !== 'external') continue;
+
+          try {
+            const inspection = await this.portManager.inspectPort(app.port, {
+              type: app.healthCheck.type,
+              path: app.healthCheck.path,
+              expectedStatus: app.healthCheck.expectedStatus,
+              expectedBodyContains: app.healthCheck.expectedBodyContains,
+              timeoutMs: app.healthCheck.timeoutMs,
+            });
+
+            if (!inspection.listener) {
+              // Listener disappeared
+              const updatedState: RuntimeState = {
+                ...RuntimeStateRepository.get(app.id)!,
+                processState: 'stopped',
+                healthState: 'unknown',
+                portState: 'unknown',
+                lastError: 'External listener disappeared',
+                updatedAt: Date.now(),
+              };
+              RuntimeStateRepository.upsert(updatedState);
+              this.emitStateChange(app.id, 'stopped', 'unknown');
+              this.emitAppLog(
+                app.id,
+                'warn',
+                `External app on port ${app.port} listener disappeared`
+              );
+              this.healthMonitor.stopCheckForApp(app.id);
+            } else {
+              // Listener still present, update PID if changed
+              const ownerPid = inspection.listener.pid;
+              const currentState = RuntimeStateRepository.get(app.id);
+              if (currentState && currentState.pid !== ownerPid) {
+                const updatedState: RuntimeState = {
+                  ...currentState,
+                  pid: ownerPid,
+                  processStartTime: Date.now(),
+                  updatedAt: Date.now(),
+                };
+                RuntimeStateRepository.upsert(updatedState);
+              }
+            }
+          } catch (error) {
+            console.error(`[AppManager] External monitor check failed for ${app.id}:`, error);
+          }
+        }
+      } catch (error) {
+        console.error(`[AppManager] External monitor check failed:`, error);
+      }
+    }, 30000); // Check every 30 seconds
+  }
+
+  stopExternalMonitoring(): void {
+    if (this.externalMonitorInterval) {
+      clearInterval(this.externalMonitorInterval);
+      this.externalMonitorInterval = null;
     }
   }
 
