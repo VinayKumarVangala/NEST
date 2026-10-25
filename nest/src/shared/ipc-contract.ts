@@ -39,6 +39,8 @@ import type {
   HealthCheckResult,
   LaunchConfigWarning,
   LaunchProfile,
+AutoRestartPolicy,
+  RestartHistoryEntry,
 } from './types';
 
 // Re-export types for consumers
@@ -57,7 +59,8 @@ export type {
   ListenerInfo,
   HealthCheckResult,
   LaunchConfigWarning,
-  LaunchProfile,
+  AutoRestartPolicy,
+  RestartHistoryEntry,
 };
 
 /** Request payload schemas (separate from full config schemas) */

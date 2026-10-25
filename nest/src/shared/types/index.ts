@@ -85,10 +85,19 @@ export interface ApplicationConfig {
   lifecycleMode: LifecycleMode;
   startupTimeoutMs: number;
   healthCheck: HealthCheckConfig;
-  lanLaunchProfile?: LaunchProfile;
   selectedInterface?: string;
+  autoRestartPolicy?: AutoRestartPolicy;
   createdAt: number;
   updatedAt: number;
+}
+
+/** Auto-restart policy for managed apps */
+export interface AutoRestartPolicy {
+  enabled: boolean;
+  maxRestarts: number;
+  windowMs: number;
+  backoffBaseMs: number;
+  backoffMaxMs: number;
 }
 
 /** Environment variable */
@@ -107,6 +116,17 @@ export interface HealthCheckConfig {
   intervalMs: number;
   timeoutMs: number;
   failureThreshold: number;
+}
+
+/** Restart history entry */
+export interface RestartHistoryEntry {
+  id: string;
+  appId: string;
+  attemptedAt: number;
+  success: boolean;
+  reason: 'crash' | 'start_timeout' | 'health_failure' | 'manual' | 'startup_failure';
+  backoffMs?: number;
+  error?: string;
 }
 
 /** Launch profile for LAN mode */

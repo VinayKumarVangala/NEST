@@ -14,7 +14,7 @@ import type {
   AccessPolicy,
   ActivityLogEntry,
   HealthCheckConfig,
-  LaunchProfile,
+  RestartHistoryEntry,
 } from '@shared/types';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -49,6 +49,7 @@ const MIGRATIONS: string[] = [
     health_check TEXT NOT NULL, -- JSON
     lan_launch_profile TEXT, -- JSON
     selected_interface TEXT,
+    auto_restart_policy TEXT, -- JSON
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
@@ -100,6 +101,28 @@ const MIGRATIONS: string[] = [
   );
 
   INSERT INTO schema_migrations (version, applied_at) VALUES (1, strftime('%s', 'now') * 1000);
+  `,
+  // 002_add_restart_history_and_auto_restart_policy
+  `
+  PRAGMA foreign_keys = ON;
+
+  CREATE TABLE IF NOT EXISTS restart_history (
+    id TEXT PRIMARY KEY,
+    app_id TEXT NOT NULL,
+    attempted_at INTEGER NOT NULL,
+    success INTEGER NOT NULL CHECK (success IN (0, 1)),
+    reason TEXT NOT NULL, -- 'crash' | 'start_timeout' | 'health_failure' | 'manual' | 'startup_failure'
+    backoff_ms INTEGER,
+    error TEXT,
+    FOREIGN KEY (app_id) REFERENCES applications(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_restart_history_app_id ON restart_history(app_id);
+  CREATE INDEX IF NOT EXISTS idx_restart_history_attempted_at ON restart_history(attempted_at);
+
+  ALTER TABLE applications ADD COLUMN auto_restart_policy TEXT; -- JSON
+
+  INSERT INTO schema_migrations (version, applied_at) VALUES (2, strftime('%s', 'now') * 1000);
   `,
 ];
 
@@ -170,6 +193,18 @@ export function closeDatabase(): void {
   }
 }
 
+/**
+ * Execute a function within a database transaction
+ * If the function throws, the transaction is rolled back
+ */
+export function withTransaction<T>(fn: (db: Database.Database) => T): T {
+  if (!db) {
+    throw new Error('Database not initialized. Call initializeDatabase() first.');
+  }
+  const transaction = db.transaction(fn);
+  return transaction(db);
+}
+
 // Secret encryption/decryption using Electron safeStorage
 function encryptSecret(value: string): string {
   if (!safeStorage.isEncryptionAvailable()) {
@@ -204,8 +239,8 @@ export const ApplicationRepository = {
     );
 
     const stmt = db!.prepare(`
-      INSERT INTO applications (id, name, project_path, runtime_label, executable, args, working_directory, env, protocol, port, expected_listen_address, lifecycle_mode, startup_timeout_ms, health_check, lan_launch_profile, selected_interface, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO applications (id, name, project_path, runtime_label, executable, args, working_directory, env, protocol, port, expected_listen_address, lifecycle_mode, startup_timeout_ms, health_check, lan_launch_profile, selected_interface, auto_restart_policy, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       app.id,
@@ -222,8 +257,8 @@ export const ApplicationRepository = {
       app.lifecycleMode,
       app.startupTimeoutMs,
       JSON.stringify(app.healthCheck),
-      app.lanLaunchProfile ? JSON.stringify(app.lanLaunchProfile) : null,
       app.selectedInterface ?? null,
+      app.autoRestartPolicy ? JSON.stringify(app.autoRestartPolicy) : null,
       app.createdAt,
       app.updatedAt
     );
@@ -286,7 +321,6 @@ export const ApplicationRepository = {
       lifecycleMode: 'lifecycle_mode',
       startupTimeoutMs: 'startup_timeout_ms',
       healthCheck: 'health_check',
-      lanLaunchProfile: 'lan_launch_profile',
       selectedInterface: 'selected_interface',
     };
 
@@ -299,7 +333,7 @@ export const ApplicationRepository = {
             e.secret ? { ...e, value: encryptSecret(e.value) } : e
           );
           values.push(JSON.stringify(envForStorage));
-        } else if (['args', 'healthCheck', 'lanLaunchProfile'].includes(key)) {
+        } else if (['args', 'healthCheck'].includes(key)) {
           values.push(JSON.stringify(value));
         } else {
           values.push(value);
@@ -409,6 +443,49 @@ export const AccessPolicyRepository = {
   list: (): AccessPolicy[] => {
     const rows = db!.prepare('SELECT * FROM access_policies').all();
     return rows.map(mapRowToAccessPolicy);
+  },
+};
+
+export const RestartHistoryRepository = {
+  insert: (entry: {
+    id: string;
+    appId: string;
+    attemptedAt: number;
+    success: boolean;
+    reason: 'crash' | 'start_timeout' | 'health_failure' | 'manual' | 'startup_failure';
+    backoffMs?: number;
+    error?: string;
+  }) => {
+    db!
+      .prepare(
+        `
+      INSERT INTO restart_history (id, app_id, attempted_at, success, reason, backoff_ms, error)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `
+      )
+      .run(
+        entry.id,
+        entry.appId,
+        entry.attemptedAt,
+        entry.success ? 1 : 0,
+        entry.reason,
+        entry.backoffMs ?? null,
+        entry.error ?? null
+      );
+  },
+
+  getByAppId: (appId: string, limit = 100): RestartHistoryEntry[] => {
+    const rows = db!
+      .prepare('SELECT * FROM restart_history WHERE app_id = ? ORDER BY attempted_at DESC LIMIT ?')
+      .all(appId, limit);
+    return rows.map(mapRowToRestartHistory);
+  },
+
+  getSince: (appId: string, since: number): RestartHistoryEntry[] => {
+    const rows = db!
+      .prepare('SELECT * FROM restart_history WHERE app_id = ? AND attempted_at >= ? ORDER BY attempted_at ASC')
+      .all(appId, since);
+    return rows.map(mapRowToRestartHistory);
   },
 };
 
@@ -530,8 +607,8 @@ function mapRowToApplication(row: any): ApplicationConfig {
     lifecycleMode: row.lifecycle_mode,
     startupTimeoutMs: row.startup_timeout_ms,
     healthCheck: JSON.parse(row.health_check),
-    lanLaunchProfile: row.lan_launch_profile ? JSON.parse(row.lan_launch_profile) : undefined,
     selectedInterface: row.selected_interface,
+    autoRestartPolicy: row.auto_restart_policy ? JSON.parse(row.auto_restart_policy) : undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -563,6 +640,18 @@ function mapRowToAccessPolicy(row: any): AccessPolicy {
     lastVerification: row.last_verification,
     lastVerificationAt: row.last_verification_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function mapRowToRestartHistory(row: any): RestartHistoryEntry {
+  return {
+    id: row.id,
+    appId: row.app_id,
+    attemptedAt: row.attempted_at,
+    success: row.success === 1,
+    reason: row.reason,
+    backoffMs: row.backoff_ms,
+    error: row.error,
   };
 }
 

@@ -7,7 +7,6 @@ import type {
   ApplicationConfig,
   EnvVar,
   HealthCheckConfig,
-  LaunchProfile,
   AccessPolicy,
   RuntimeState,
   ActivityLogEntry,
@@ -32,6 +31,8 @@ import type {
   HealthCheckType,
   NetworkProfile,
   InterfaceType,
+  AutoRestartPolicy,
+  RestartHistoryEntry,
 } from '../types';
 
 // Re-export types
@@ -39,7 +40,6 @@ export type {
   ApplicationConfig,
   EnvVar,
   HealthCheckConfig,
-  LaunchProfile,
   AccessPolicy,
   RuntimeState,
   ActivityLogEntry,
@@ -64,6 +64,8 @@ export type {
   HealthCheckType,
   NetworkProfile,
   InterfaceType,
+  AutoRestartPolicy,
+  RestartHistoryEntry,
 };
 
 /** Error codes */
@@ -193,12 +195,6 @@ export const HealthCheckConfigSchema = z.object({
   failureThreshold: z.number().int().positive().default(3),
 });
 
-/** LaunchProfile schema */
-export const LaunchProfileSchema = z.object({
-  args: z.array(z.string()).default([]),
-  env: z.array(EnvVarSchema).default([]),
-});
-
 /** ApplicationConfig schema */
 export const ApplicationConfigSchema = z.object({
   id: z.string().uuid(),
@@ -220,7 +216,6 @@ export const ApplicationConfigSchema = z.object({
     timeoutMs: 5000,
     failureThreshold: 3,
   }),
-  lanLaunchProfile: LaunchProfileSchema.optional(),
   selectedInterface: z.string().optional(),
   createdAt: z.number().int().positive(),
   updatedAt: z.number().int().positive(),
