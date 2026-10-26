@@ -9,41 +9,8 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import * as path from 'path';
 
-/**
- * Compute SHA256 hash of firewall-helper.ps1 for runtime integrity verification.
- * This hash is embedded in the app and verified before executing the script.
- */
-function getFirewallHelperHash(): string {
-  const helperPath = 'resources/firewall-helper.ps1';
-  if (fs.existsSync(helperPath)) {
-    const content = fs.readFileSync(helperPath);
-    return crypto.createHash('sha256').update(content).digest('hex');
-  }
-  return '';
-}
-
-const FIREWALL_HELPER_HASH = getFirewallHelperHash();
-
-/**
- * Custom plugin to inject the firewall helper hash into the WindowsAdapter at build time.
- * Replaces the placeholder '__FIREWALL_HELPER_HASH__' with the actual SHA256 hash.
- */
-class InjectFirewallHashPlugin {
-  name = 'inject-firewall-hash';
-
-  async packageAfterExtract(config: any, buildPath: string) {
-    const adapterPath = path.join(buildPath, 'main', 'os', 'windows', 'WindowsAdapter.js');
-    if (fs.existsSync(adapterPath)) {
-      let content = fs.readFileSync(adapterPath, 'utf8');
-      const placeholder = '__FIREWALL_HELPER_HASH__';
-      if (content.includes(placeholder)) {
-        content = content.replace(new RegExp(placeholder, 'g'), FIREWALL_HELPER_HASH);
-        fs.writeFileSync(adapterPath, content, 'utf8');
-        console.log('[InjectFirewallHashPlugin] Injected firewall helper hash:', FIREWALL_HELPER_HASH);
-      }
-    }
-  }
-}
+import { FIREWALL_HELPER_HASH } from './src/forge-plugins/firewall-hash';
+import { InjectFirewallHashPlugin } from './src/forge-plugins/inject-firewall-hash';
 
 const config: ForgeConfig = {
   packagerConfig: {
