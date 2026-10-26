@@ -254,20 +254,186 @@ export class WindowsAdapter implements OsAdapter {
 
   async terminateProcessTree(
     pid: number,
-    options: { graceful: boolean }
-  ): Promise<{ success: boolean; error?: string }> {
+    options: { graceful: boolean; rootStartTime?: number }
+  ): Promise<{ success: boolean; error?: string; killedPids?: number[] }> {
     try {
-      // First try graceful termination
-      if (options.graceful) {
-        await execAsync(`taskkill /PID ${pid} /T`);
-        return { success: true };
+      // Verify root ownership if startTime provided
+      if (options.rootStartTime !== undefined) {
+        const rootInfo = await this.getProcessInfo(pid);
+        if (!rootInfo) {
+          return { success: false, error: `Root process ${pid} not found` };
+        }
+        if (rootInfo.startTime !== options.rootStartTime) {
+          return {
+            success: false,
+            error: `Root process ${pid} start time mismatch (expected ${options.rootStartTime}, got ${rootInfo.startTime}) - PID reused`,
+          };
+        }
       }
 
-      // Force kill
-      await execAsync(`taskkill /F /PID ${pid} /T`);
-      return { success: true };
+      // Get all descendants with ownership verification
+      const descendants = await this.getVerifiedDescendants(pid, options.rootStartTime);
+
+      if (descendants.length === 0) {
+        // No descendants, just kill root
+        const killCmd = options.graceful ? `taskkill /PID ${pid}` : `taskkill /F /PID ${pid}`;
+        await execAsync(killCmd);
+        return { success: true, killedPids: [pid] };
+      }
+
+      // Kill in reverse order (children first, then parents)
+      // This prevents orphaned processes that might respawn
+      const pidsToKill = [...descendants.map((d) => d.pid), pid].reverse();
+      const killedPids: number[] = [];
+
+      for (const killPid of pidsToKill) {
+        try {
+          // Re-verify ownership at kill time (race condition mitigation)
+          if (killPid !== pid) {
+            const verified = await this.verifyDescendantOwnership(killPid, pid, options.rootStartTime);
+            if (!verified) {
+              console.log(`[WindowsAdapter] Skipping ${killPid} - ownership verification failed at kill time`);
+              continue;
+            }
+          }
+
+          const killCmd = options.graceful ? `taskkill /PID ${killPid}` : `taskkill /F /PID ${killPid}`;
+          await execAsync(killCmd);
+          killedPids.push(killPid);
+        } catch (error) {
+          // Process may have already exited
+          console.log(`[WindowsAdapter] Process ${killPid} already exited or could not be killed`);
+        }
+      }
+
+      return { success: true, killedPids };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  /**
+   * Get all verified descendants of a process
+   * Walks parent chain from each candidate back to root
+   */
+  private async getVerifiedDescendants(
+    rootPid: number,
+    rootStartTime?: number
+  ): Promise<Array<{ pid: number; startTime: number; parentPid: number }>> {
+    try {
+      // Get all processes in system
+      const { stdout } = await execAsync(
+        'powershell -NoProfile -Command "Get-CimInstance Win32_Process | Select-Object ProcessId, CreationDate, ParentProcessId | ConvertTo-Json"'
+      );
+      const allProcesses: Win32Process[] = JSON.parse(stdout);
+      const procArray = Array.isArray(allProcesses) ? allProcesses : allProcesses ? [allProcesses] : [];
+
+      // Build process map for O(1) lookups
+      const processMap = new Map<number, Win32Process>();
+      for (const p of procArray) {
+        processMap.set(p.ProcessId, p);
+      }
+
+      // Find all candidates whose parent chain leads to root
+      const verified: Array<{ pid: number; startTime: number; parentPid: number }> = [];
+
+      for (const proc of procArray) {
+        if (proc.ProcessId === rootPid) continue;
+
+        // Walk parent chain
+        let current = proc;
+        let isDescendant = false;
+        const chain: number[] = [];
+
+        while (current && current.ParentProcessId !== 0) {
+          chain.push(current.ProcessId);
+
+          if (current.ParentProcessId === rootPid) {
+            isDescendant = true;
+            break;
+          }
+
+          const parent = processMap.get(current.ParentProcessId);
+          if (!parent) break;
+          current = parent;
+        }
+
+        if (isDescendant) {
+          // Verify the entire chain has consistent start times (no PID reuse in chain)
+          let chainValid = true;
+          for (const chainPid of chain) {
+            const chainProc = processMap.get(chainPid);
+            if (!chainProc) {
+              chainValid = false;
+              break;
+            }
+          }
+
+          if (chainValid) {
+            verified.push({
+              pid: proc.ProcessId,
+              startTime: new Date(proc.CreationDate).getTime(),
+              parentPid: proc.ParentProcessId,
+            });
+          }
+        }
+      }
+
+      return verified;
+    } catch (error) {
+      console.error('[WindowsAdapter] Failed to get verified descendants:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Verify a specific PID is still a descendant of root at kill time
+   */
+  private async verifyDescendantOwnership(
+    targetPid: number,
+    rootPid: number,
+    rootStartTime?: number
+  ): Promise<boolean> {
+    try {
+      // Get target process info
+      const targetInfo = await this.getProcessInfo(targetPid);
+      if (!targetInfo) return false;
+
+      // Verify root still exists and has correct start time
+      if (rootStartTime !== undefined) {
+        const rootInfo = await this.getProcessInfo(rootPid);
+        if (!rootInfo || rootInfo.startTime !== rootStartTime) {
+          return false; // Root was replaced
+        }
+      }
+
+      // Walk parent chain from target to root
+      const { stdout } = await execAsync(
+        `powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"ProcessId=${targetPid}\\" | Select-Object ProcessId, ParentProcessId | ConvertTo-Json"`
+      );
+      let current: Win32Process = JSON.parse(stdout);
+      current = Array.isArray(current) ? current[0] : current;
+
+      if (!current) return false;
+
+      while (current && current.ParentProcessId !== 0) {
+        if (current.ParentProcessId === rootPid) {
+          return true; // Verified descendant
+        }
+
+        // Get parent
+        const { stdout: parentOut } = await execAsync(
+          `powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"ProcessId=${current.ParentProcessId}\\" | Select-Object ProcessId, ParentProcessId | ConvertTo-Json"`
+        );
+        const parent = JSON.parse(parentOut);
+        current = Array.isArray(parent) ? parent[0] : parent;
+
+        if (!current) break;
+      }
+
+      return false;
+    } catch {
+      return false;
     }
   }
 

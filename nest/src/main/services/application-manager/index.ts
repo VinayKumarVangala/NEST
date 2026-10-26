@@ -614,10 +614,16 @@ export class ApplicationManager {
 
       const processRef = this.runningProcesses.get(id);
       if (processRef) {
-        const result = await this.osAdapter.terminateProcessTree(state.pid!, { graceful: !force });
+        const result = await this.osAdapter.terminateProcessTree(state.pid!, { 
+          graceful: !force,
+          rootStartTime: state.processStartTime,
+        });
         if (!result.success && !force) {
           // Try force
-          await this.osAdapter.terminateProcessTree(state.pid!, { graceful: false });
+          await this.osAdapter.terminateProcessTree(state.pid!, { 
+            graceful: false,
+            rootStartTime: state.processStartTime,
+          });
         }
       }
 
