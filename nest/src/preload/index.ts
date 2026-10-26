@@ -63,6 +63,9 @@ const nestAPI: NestAPI = {
   logs: {
     query: (params) => invoke('logs.query', params),
   },
+  audit: {
+    query: (params) => invoke('audit.query', params),
+  },
   settings: {
     get: () => invoke('settings.get', undefined),
     update: (params) => invoke('settings.update', params),

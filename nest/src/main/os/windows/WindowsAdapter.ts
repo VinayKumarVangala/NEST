@@ -7,6 +7,8 @@ import { exec } from 'node:child_process';
 import { resolve, join } from 'node:path';
 import { writeFile, readFile, unlink, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { logAuditEvent } from '../../services/logging';
+import * as crypto from 'crypto';
 import type {
   ResolvedExecutable,
   ProcessInfo,
@@ -606,6 +608,34 @@ export class WindowsAdapter implements OsAdapter {
   }
 
   /**
+   * Expected SHA256 hash of firewall-helper.ps1 for integrity verification.
+   * This is injected at build time by forge.config.ts.
+   */
+  private readonly FIREWALL_HELPER_EXPECTED_HASH = '__FIREWALL_HELPER_HASH__';
+
+  /**
+   * Verify the firewall helper script integrity by comparing SHA256 hash.
+   * Throws if the hash doesn't match expected value.
+   */
+  private async verifyFirewallHelperIntegrity(): Promise<void> {
+    const helperPath = this.getFirewallHelperPath();
+    try {
+      const content = await readFile(helperPath, 'utf8');
+      const actualHash = crypto.createHash('sha256').update(content).digest('hex');
+      if (actualHash !== this.FIREWALL_HELPER_EXPECTED_HASH) {
+        throw new Error(
+          `Firewall helper integrity check failed: expected ${this.FIREWALL_HELPER_EXPECTED_HASH}, got ${actualHash}`
+        );
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('integrity check failed')) {
+        throw error;
+      }
+      throw new Error(`Failed to verify firewall helper: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
    * Get the path to the firewall helper script
    */
   private getFirewallHelperPath(): string {
@@ -624,6 +654,9 @@ export class WindowsAdapter implements OsAdapter {
     params: Record<string, any>,
     elevated: boolean
   ): Promise<any> {
+    // Verify firewall helper integrity before execution
+    await this.verifyFirewallHelperIntegrity();
+
     const helperPath = this.getFirewallHelperPath();
 
     // Create a temp directory with restricted ACL for input/output files
@@ -724,6 +757,38 @@ export class WindowsAdapter implements OsAdapter {
       true
     );
 
+    // Log audit event
+    const success = result.success === true;
+    const outcome = success
+      ? 'success'
+      : result.error?.includes('ELEVATION_DENIED')
+        ? 'elevation_denied'
+        : result.error?.includes('POLICY_BLOCKED')
+          ? 'policy_blocked'
+          : result.error?.includes('execution policy')
+            ? 'execution_policy_restricted'
+            : result.error?.includes('hash mismatch')
+              ? 'hash_mismatch'
+              : 'failed';
+
+    logAuditEvent(
+      'firewall_add',
+      outcome as any,
+      {
+        appId: params.appId,
+        appName: params.name,
+        port: params.port,
+        remoteSubnet,
+        ruleName: `NEST-${params.appId}`,
+        profile: 'Private',
+      },
+      result.error,
+      true,
+      success,
+      params.appId,
+      params.name
+    );
+
     return result;
   }
 
@@ -734,6 +799,31 @@ export class WindowsAdapter implements OsAdapter {
         AppId: appId,
       },
       true
+    );
+
+    // Log audit event
+    const success = result.success === true;
+    const outcome = success
+      ? 'success'
+      : result.error?.includes('ELEVATION_DENIED')
+        ? 'elevation_denied'
+        : result.error?.includes('POLICY_BLOCKED')
+          ? 'policy_blocked'
+          : result.error?.includes('execution policy')
+            ? 'execution_policy_restricted'
+            : 'failed';
+
+    logAuditEvent(
+      'firewall_remove',
+      outcome as any,
+      {
+        appId,
+        ruleName: `NEST-${appId}`,
+      },
+      result.error,
+      true,
+      success,
+      appId
     );
 
     return result;
@@ -767,6 +857,31 @@ export class WindowsAdapter implements OsAdapter {
       {
         ExpectedRulesJson: JSON.stringify(expectedRules),
       },
+      false
+    );
+
+    // Log audit event
+    const success = result.success === true;
+    const outcome = success
+      ? 'success'
+      : result.error?.includes('ELEVATION_DENIED')
+        ? 'elevation_denied'
+        : result.error?.includes('POLICY_BLOCKED')
+          ? 'policy_blocked'
+          : result.error?.includes('execution policy')
+            ? 'execution_policy_restricted'
+            : 'failed';
+
+    logAuditEvent(
+      'firewall_reconcile',
+      outcome as any,
+      {
+        expectedRulesCount: expectedRules.length,
+        orphanedCount: result.orphaned?.length || 0,
+        missingCount: result.missing?.length || 0,
+      },
+      result.error,
+      false,
       false
     );
 

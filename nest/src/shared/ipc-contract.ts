@@ -27,6 +27,9 @@ import {
   AccessWorkflowStepResponseSchema,
   AccessWorkflowStatusRequestSchema,
   AccessWorkflowStatusSchema,
+  AuditEntrySchema,
+  AuditQueryParamsSchema,
+  AuditQueryResultSchema,
 } from './schemas';
 import type {
   ApplicationConfig,
@@ -47,6 +50,11 @@ import type {
   AutoRestartPolicy,
   RestartHistoryEntry,
   AccessWorkflowStatus,
+  AuditEntry,
+  AuditQueryParams,
+  AuditQueryResult,
+  PrivilegedOperationType,
+  PrivilegedOperationOutcome,
 } from './types';
 
 // Re-export types for consumers
@@ -67,6 +75,11 @@ export type {
   LaunchConfigWarning,
   AutoRestartPolicy,
   RestartHistoryEntry,
+  AuditEntry,
+  AuditQueryParams,
+  AuditQueryResult,
+  PrivilegedOperationType,
+  PrivilegedOperationOutcome,
 };
 export { AppsCreateRequestSchema };
 
@@ -348,6 +361,7 @@ export const EventChannels = {
   }) as z.ZodType<{
     timestamp: number;
   }>,
+  'audit.entry': AuditEntrySchema,
 } as const;
 
 /** Request/Response channels (renderer -> main) */
@@ -520,6 +534,13 @@ export const RequestChannels = {
     )
   ),
 
+  // Audit
+  'audit.query': createChannel(
+    'audit.query',
+    AuditQueryParamsSchema,
+    makeResultSchema(AuditQueryResultSchema)
+  ),
+
   // Settings
   'settings.get': createChannel(
     'settings.get',
@@ -681,6 +702,17 @@ export interface NestAPI {
       limit?: number;
       offset?: number;
     }): Promise<Result<{ entries: ActivityLogEntry[]; total: number }>>;
+  };
+  audit: {
+    query(params: {
+      appId?: string;
+      operationType?: PrivilegedOperationType;
+      outcome?: PrivilegedOperationOutcome;
+      from?: number;
+      to?: number;
+      limit?: number;
+      offset?: number;
+    }): Promise<Result<{ entries: AuditEntry[]; total: number }>>;
   };
   settings: {
     get(): Promise<

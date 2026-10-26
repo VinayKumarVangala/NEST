@@ -1,4 +1,4 @@
-/**
+﻿/**
  * IPC Client - Typed client for renderer to communicate with main process
  */
 import { useCallback, useEffect, useRef } from 'react';
@@ -18,10 +18,23 @@ import type {
   ListenerInfo,
   LaunchConfigWarning,
   EventChannelName,
+  PrivilegedOperationType,
+  PrivilegedOperationOutcome,
 } from '@shared/ipc-contract';
 
 // Type-safe wrapper around window.nest
 const api = window.nest as NestAPI;
+
+// Type definitions for complex result types
+interface LogQueryResult {
+  entries: ActivityLogEntry[];
+  total: number;
+}
+
+interface AuditQueryResult {
+  entries: any[];
+  total: number;
+}
 
 export const nest = {
   apps: {
@@ -106,7 +119,19 @@ export const nest = {
       text?: string;
       limit?: number;
       offset?: number;
-    }) => api.logs.query(params) as Promise<Result<{ entries: ActivityLogEntry[]; total: number }>>,
+    }) => api.logs.query(params) as Promise<Result<LogQueryResult>>,
+  },
+
+  audit: {
+    query: (params: {
+      appId?: string;
+      operationType?: PrivilegedOperationType;
+      outcome?: PrivilegedOperationOutcome;
+      from?: number;
+      to?: number;
+      limit?: number;
+      offset?: number;
+    }) => api.audit.query(params) as Promise<Result<AuditQueryResult>>,
   },
 
   settings: {
@@ -121,6 +146,17 @@ export const nest = {
   on: <K extends EventChannelName>(channel: K, callback: any) => api.on(channel, callback),
   off: <K extends EventChannelName>(channel: K, callback: any) => api.off(channel, callback),
 };
+
+// Type definitions for complex result types
+interface LogQueryResult {
+  entries: ActivityLogEntry[];
+  total: number;
+}
+
+interface AuditQueryResult {
+  entries: any[];
+  total: number;
+}
 
 // React hooks for IPC
 /** Generic query hook for IPC calls */

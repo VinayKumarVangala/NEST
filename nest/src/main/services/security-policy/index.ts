@@ -26,6 +26,7 @@ import type {
 import type { Result } from '@shared/types';
 import { eventBus, setupEventBus } from '../../events';
 import { AccessPolicyRepository } from '../../db';
+import { logAuditEvent } from '../logging';
 
 export class SecurityPolicyManager {
   private osAdapter: any;
@@ -661,6 +662,15 @@ export class SecurityPolicyManager {
   async disableAccess(appId: string, restartWithLocalProfile: boolean): Promise<DisableRollback> {
     const app = await this.applicationManager.getApplication(appId);
     if (!app) {
+      logAuditEvent(
+        'lan_disable',
+        'failed',
+        { appId, reason: 'APPLICATION_NOT_FOUND' },
+        'Application not found',
+        false,
+        false,
+        appId
+      );
       return {
         step: 9,
         name: 'Disable / Rollback',
@@ -693,6 +703,22 @@ export class SecurityPolicyManager {
         ruleName: policy.firewallRuleRef,
         timestamp: Date.now(),
       });
+
+      // Log audit event for firewall removal
+      logAuditEvent(
+        'firewall_remove',
+        firewallRuleRemoved ? 'success' : 'failed',
+        {
+          appId,
+          appName: app.name,
+          ruleName: `NEST-${app.id}`,
+        },
+        result.error,
+        true,
+        firewallRuleRemoved,
+        appId,
+        app.name
+      );
     }
 
     // Restore local_only policy
@@ -708,6 +734,23 @@ export class SecurityPolicyManager {
       await this.applicationManager.restart(appId);
       restartWithLocalProfileDone = true;
     }
+
+    // Log audit event for LAN disable
+    logAuditEvent(
+      'lan_disable',
+      'success',
+      {
+        appId,
+        appName: app.name,
+        firewallRuleRemoved,
+        restartWithLocalProfile: restartWithLocalProfileDone,
+      },
+      undefined,
+      false,
+      false,
+      appId,
+      app.name
+    );
 
     return {
       step: 9,
@@ -1092,11 +1135,31 @@ export class SecurityPolicyManager {
 
     const status = await this.getAccessStatus(appId);
     if (status.bindingClass === 'loopback_only') {
+      logAuditEvent(
+        'lan_enable',
+        'failed',
+        { appId, appName: app.name, reason: 'LOOPBACK_ONLY' },
+        'LOOPBACK_ONLY: App is listening only on loopback',
+        true,
+        false,
+        appId,
+        app.name
+      );
       throw new Error('LOOPBACK_ONLY');
     }
 
     // Check LAN eligibility
     if (!status.isLanEligible) {
+      logAuditEvent(
+        'lan_enable',
+        'failed',
+        { appId, appName: app.name, reason: 'NOT_LAN_ELIGIBLE' },
+        'NOT_LAN_ELIGIBLE: App is not listening on a LAN-eligible address',
+        true,
+        false,
+        appId,
+        app.name
+      );
       throw new Error(
         'NOT_LAN_ELIGIBLE: App is not listening on a LAN-eligible address (0.0.0.0 or specific LAN IP).'
       );
@@ -1107,6 +1170,16 @@ export class SecurityPolicyManager {
     const interfaces = await this.networkManager.listInterfaces();
     const selected = interfaces.find((i: any) => i.name === selectedInterface);
     if (!selected) {
+      logAuditEvent(
+        'lan_enable',
+        'failed',
+        { appId, appName: app.name, reason: 'NO_INTERFACE_SELECTED' },
+        'No network interface selected for LAN access',
+        true,
+        false,
+        appId,
+        app.name
+      );
       throw new Error('No network interface selected for LAN access');
     }
 
@@ -1141,6 +1214,24 @@ export class SecurityPolicyManager {
       ruleName: policy.firewallRuleRef,
       timestamp: Date.now(),
     });
+
+    // Log audit event for successful LAN enable
+    logAuditEvent(
+      'lan_enable',
+      'success',
+      {
+        appId,
+        appName: app.name,
+        lanUrl,
+        interface: selected?.name,
+        firewallRuleRef: policy.firewallRuleRef,
+      },
+      undefined,
+      true,
+      true,
+      appId,
+      app.name
+    );
 
     return {
       policy,

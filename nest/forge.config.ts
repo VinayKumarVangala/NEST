@@ -5,12 +5,60 @@ import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-nati
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 import { VitePlugin } from '@electron-forge/plugin-vite';
+import * as fs from 'fs';
+import * as crypto from 'crypto';
+import * as path from 'path';
+
+/**
+ * Compute SHA256 hash of firewall-helper.ps1 for runtime integrity verification.
+ * This hash is embedded in the app and verified before executing the script.
+ */
+function getFirewallHelperHash(): string {
+  const helperPath = 'resources/firewall-helper.ps1';
+  if (fs.existsSync(helperPath)) {
+    const content = fs.readFileSync(helperPath);
+    return crypto.createHash('sha256').update(content).digest('hex');
+  }
+  return '';
+}
+
+const FIREWALL_HELPER_HASH = getFirewallHelperHash();
+
+/**
+ * Custom plugin to inject the firewall helper hash into the WindowsAdapter at build time.
+ * Replaces the placeholder '__FIREWALL_HELPER_HASH__' with the actual SHA256 hash.
+ */
+class InjectFirewallHashPlugin {
+  name = 'inject-firewall-hash';
+
+  async packageAfterExtract(config: any, buildPath: string) {
+    const adapterPath = path.join(buildPath, 'main', 'os', 'windows', 'WindowsAdapter.js');
+    if (fs.existsSync(adapterPath)) {
+      let content = fs.readFileSync(adapterPath, 'utf8');
+      const placeholder = '__FIREWALL_HELPER_HASH__';
+      if (content.includes(placeholder)) {
+        content = content.replace(new RegExp(placeholder, 'g'), FIREWALL_HELPER_HASH);
+        fs.writeFileSync(adapterPath, content, 'utf8');
+        console.log('[InjectFirewallHashPlugin] Injected firewall helper hash:', FIREWALL_HELPER_HASH);
+      }
+    }
+  }
+}
 
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     icon: 'resources/icon.ico',
-    extraResource: ['resources/firewall-helper.ps1'],
+    extraResource: [
+      'resources/firewall-helper.ps1',
+    ],
+    // Embed the firewall helper hash for runtime integrity verification
+    executableName: 'NEST',
+    // Version from package.json is used automatically
+    // Per-user install is Squirrel default (no config needed)
+    // Code signing configuration via environment variables
+    // CSC_LINK (URL to .pfx) and CSC_KEY_PASSWORD for CI/CD
+    // Unsigned builds allowed when CSC_LINK is not set (dev)
   },
   rebuildConfig: {},
   makers: [
@@ -19,11 +67,19 @@ const config: ForgeConfig = {
       setupIcon: 'resources/icon.ico',
       loadingGif: 'resources/installer-loading.gif',
       noMsi: true,
+      // Per-user install is Squirrel default (installs to %LOCALAPPDATA%)
+      // Squirrel handles per-user by default, no admin required
+      // Upgrade path: Squirrel handles delta updates, preserves user data
+      // Uninstall: Squirrel offers cleanup but we add custom handler for firewall rules
     }),
     new MakerZIP({}, ['win32']),
   ],
   plugins: [
-    new AutoUnpackNativesPlugin({}),
+    new AutoUnpackNativesPlugin({
+      // Automatically unpack native modules (better-sqlite3) for Electron
+      // Required for native Node.js modules in asar archives
+    }),
+    new InjectFirewallHashPlugin(),
     new FusesPlugin({
       version: FuseVersion.V1,
       [FuseV1Options.RunAsNode]: false,

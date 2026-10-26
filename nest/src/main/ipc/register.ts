@@ -279,6 +279,43 @@ export function registerHandlers(
     return result;
   });
 
+  // Audit
+  createHandler('audit.query', async (params: any) => {
+    // For now, return from in-memory buffer
+    // In production, this would query a persistent store
+    const { getAuditBuffer } = require('../services/logging');
+    const buffer = getAuditBuffer();
+    
+    // Apply filters
+    let entries = buffer.map((line: string) => JSON.parse(line));
+    
+    if (params.appId) {
+      entries = entries.filter((e: any) => e.appId === params.appId);
+    }
+    if (params.operationType) {
+      entries = entries.filter((e: any) => e.operationType === params.operationType);
+    }
+    if (params.outcome) {
+      entries = entries.filter((e: any) => e.outcome === params.outcome);
+    }
+    if (params.from) {
+      entries = entries.filter((e: any) => e.timestamp >= params.from);
+    }
+    if (params.to) {
+      entries = entries.filter((e: any) => e.timestamp <= params.to);
+    }
+    
+    // Sort by timestamp descending (newest first)
+    entries.sort((a: any, b: any) => b.timestamp - a.timestamp);
+    
+    const total = entries.length;
+    const offset = params.offset || 0;
+    const limit = params.limit || 1000;
+    const paginated = entries.slice(offset, offset + limit);
+    
+    return { entries: paginated, total };
+  });
+
   // Settings
   createHandler('settings.get', async () => {
     const settings = services.settings;

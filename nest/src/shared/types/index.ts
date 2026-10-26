@@ -326,6 +326,59 @@ export interface FirewallReconcileResult {
   error?: string;
 }
 
+/** Privileged operation types */
+export type PrivilegedOperationType =
+  | 'firewall_add'
+  | 'firewall_remove'
+  | 'firewall_reconcile'
+  | 'process_terminate'
+  | 'lan_enable'
+  | 'lan_disable'
+  | 'elevation_request';
+
+/** Privileged operation outcome */
+export type PrivilegedOperationOutcome =
+  | 'success'
+  | 'failed'
+  | 'elevation_denied'
+  | 'policy_blocked'
+  | 'execution_policy_restricted'
+  | 'hash_mismatch'
+  | 'rule_disabled_by_admin'
+  | 'rule_exists_disabled'
+  | 'internal_error';
+
+/** Audit entry for privileged operations */
+export interface AuditEntry {
+  id: string;
+  timestamp: number;
+  operationType: PrivilegedOperationType;
+  appId?: string;
+  appName?: string;
+  outcome: PrivilegedOperationOutcome;
+  osErrorText?: string;
+  details: Record<string, unknown>;
+  requiresElevation: boolean;
+  wasElevated: boolean;
+}
+
+/** Audit query parameters */
+export interface AuditQueryParams {
+  appId?: string;
+  operationType?: PrivilegedOperationType;
+  outcome?: PrivilegedOperationOutcome;
+  from?: number;
+  to?: number;
+  limit?: number;
+  offset?: number;
+}
+
+/** Audit query result */
+export interface AuditQueryResult {
+  entries: AuditEntry[];
+  total: number;
+}
+
 /** Launch config warning */
 export interface LaunchConfigWarning {
   type:

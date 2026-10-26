@@ -9,6 +9,7 @@ const navigation = [
   { name: 'Network', href: '/network' },
   { name: 'Logs', href: '/logs' },
   { name: 'Diagnostics', href: '/diagnostics' },
+  { name: 'Audit', href: '/audit' },
   { name: 'Settings', href: '/settings' },
 ];
 

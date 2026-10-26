@@ -471,3 +471,73 @@ export function getLoggingConfig(): {
     logMaxFilesPerApp: maxFilesPerApp,
   };
 }
+
+// ============================================================================
+// Audit Logging
+// ============================================================================
+
+// In-memory ring buffer for audit entries (bounded)
+const auditBuffer: string[] = [];
+const AUDIT_BUFFER_MAX = 10000;
+
+/**
+ * Log a privileged operation audit entry
+ */
+export function logAuditEvent(
+  operationType: 'firewall_add' | 'firewall_remove' | 'firewall_reconcile' | 'process_terminate' | 'lan_enable' | 'lan_disable' | 'elevation_request',
+  outcome: 'success' | 'failed' | 'elevation_denied' | 'policy_blocked' | 'execution_policy_restricted' | 'hash_mismatch' | 'rule_disabled_by_admin' | 'rule_exists_disabled' | 'internal_error',
+  details: Record<string, unknown>,
+  osErrorText?: string,
+  requiresElevation: boolean = false,
+  wasElevated: boolean = false,
+  appId?: string,
+  appName?: string
+): void {
+  const { AuditEntrySchema } = require('@shared/schemas');
+  const { v4: uuidv4 } = require('uuid');
+
+  const entry = {
+    id: uuidv4(),
+    timestamp: Date.now(),
+    operationType,
+    outcome,
+    osErrorText,
+    details,
+    requiresElevation,
+    wasElevated,
+    appId,
+    appName,
+  };
+
+  // Validate against schema (in development)
+  if (process.env.NODE_ENV === 'development') {
+    const result = AuditEntrySchema.safeParse(entry);
+    if (!result.success) {
+      console.error('[Audit] Invalid audit entry:', result.error);
+    }
+  }
+
+  // Add to ring buffer
+  auditBuffer.push(JSON.stringify(entry));
+  if (auditBuffer.length > AUDIT_BUFFER_MAX) {
+    auditBuffer.shift();
+  }
+
+  // Emit to renderer for real-time updates
+  const { eventBus } = require('../../events');
+  eventBus.emit('audit.entry', entry);
+}
+
+/**
+ * Get the in-memory audit ring buffer
+ */
+export function getAuditBuffer(): string[] {
+  return [...auditBuffer];
+}
+
+/**
+ * Clear the audit buffer
+ */
+export function clearAuditBuffer(): void {
+  auditBuffer.length = 0;
+}

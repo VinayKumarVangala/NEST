@@ -8,6 +8,7 @@ import { Network } from '@renderer/features/network/Network';
 import { Logs } from '@renderer/features/logs/Logs';
 import { Settings } from '@renderer/features/settings/Settings';
 import { Diagnostics } from '@renderer/features/diagnostics/Diagnostics';
+import { Audit } from '@renderer/features/audit/Audit';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -31,6 +32,7 @@ export function App() {
             <Route path="/logs" element={<Logs />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/diagnostics" element={<Diagnostics />} />
+            <Route path="/audit" element={<Audit />} />
           </Routes>
         </Layout>
       </BrowserRouter>

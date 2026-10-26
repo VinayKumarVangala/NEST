@@ -22,6 +22,7 @@ import {
 } from '../../db';
 import { lintLaunchConfig } from '@shared/schemas';
 import { PortGuard, NoOpPortGuardImpl } from '../port-manager';
+import { logAuditEvent } from '../logging';
 
 // State machine transition validation
 const VALID_TRANSITIONS: Record<ProcessState, ProcessState[]> = {
@@ -613,14 +614,15 @@ export class ApplicationManager {
       this.emitStateChange(id, 'stopping', state.healthState);
 
       const processRef = this.runningProcesses.get(id);
+      let terminationResult: { success: boolean; killedPids?: number[]; error?: string } = { success: false };
       if (processRef) {
-        const result = await this.osAdapter.terminateProcessTree(state.pid!, { 
+        terminationResult = await this.osAdapter.terminateProcessTree(state.pid!, { 
           graceful: !force,
           rootStartTime: state.processStartTime,
         });
-        if (!result.success && !force) {
+        if (!terminationResult.success && !force) {
           // Try force
-          await this.osAdapter.terminateProcessTree(state.pid!, { 
+          terminationResult = await this.osAdapter.terminateProcessTree(state.pid!, { 
             graceful: false,
             rootStartTime: state.processStartTime,
           });
@@ -637,6 +639,25 @@ export class ApplicationManager {
       RuntimeStateRepository.upsert(finalState);
       this.emitStateChange(id, 'stopped', 'unknown');
       this.emitAppLog(id, 'info', 'Application stopped');
+
+      // Log audit event for process termination
+      const success = terminationResult.success === true;
+      logAuditEvent(
+        'process_terminate',
+        success ? 'success' : 'failed',
+        {
+          appId: id,
+          appName: app?.name || id,
+          pid: state.pid,
+          force,
+          killedPids: terminationResult.killedPids,
+        },
+        terminationResult.error,
+        false,
+        success,
+        id,
+        app?.name
+      );
 
       return finalState;
     });

@@ -448,6 +448,61 @@ export const AccessWorkflowStatusSchema = z.object({
   error: z.string().optional(),
 });
 
+/** Privileged operation types */
+export const PrivilegedOperationTypeSchema = z.enum([
+  'firewall_add',
+  'firewall_remove',
+  'firewall_reconcile',
+  'process_terminate',
+  'lan_enable',
+  'lan_disable',
+  'elevation_request',
+]);
+
+/** Privileged operation outcome */
+export const PrivilegedOperationOutcomeSchema = z.enum([
+  'success',
+  'failed',
+  'elevation_denied',
+  'policy_blocked',
+  'execution_policy_restricted',
+  'hash_mismatch',
+  'rule_disabled_by_admin',
+  'rule_exists_disabled',
+  'internal_error',
+]);
+
+/** Audit entry schema */
+export const AuditEntrySchema = z.object({
+  id: uuidSchema,
+  timestamp: z.number().int().positive(),
+  operationType: PrivilegedOperationTypeSchema,
+  appId: uuidSchema.optional(),
+  appName: z.string().optional(),
+  outcome: PrivilegedOperationOutcomeSchema,
+  osErrorText: z.string().optional(),
+  details: z.record(z.unknown()),
+  requiresElevation: z.boolean(),
+  wasElevated: z.boolean(),
+});
+
+/** Audit query parameters schema */
+export const AuditQueryParamsSchema = z.object({
+  appId: uuidSchema.optional(),
+  operationType: PrivilegedOperationTypeSchema.optional(),
+  outcome: PrivilegedOperationOutcomeSchema.optional(),
+  from: z.number().int().positive().optional(),
+  to: z.number().int().positive().optional(),
+  limit: z.number().int().positive().max(10000).default(1000),
+  offset: z.number().int().nonnegative().default(0),
+});
+
+/** Audit query result schema */
+export const AuditQueryResultSchema = z.object({
+  entries: z.array(AuditEntrySchema),
+  total: z.number().int().nonnegative(),
+});
+
 /** Lint launch config for warnings (not errors) */
 export function lintLaunchConfig(config: ApplicationConfig): LaunchConfigWarning[] {
   const warnings: LaunchConfigWarning[] = [];

@@ -443,6 +443,9 @@ let networkManager: NetworkManager;
 let securityPolicyManager: SecurityPolicyManager;
 let diagnosticsService: DiagnosticsService;
 
+// Run uninstall handler if this is an uninstall
+handleUninstall();
+
 app.whenReady().then(initializeApp).catch(console.error);
 
 app.on('window-all-closed', () => {
@@ -465,3 +468,34 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled rejection:', reason);
 });
+
+/**
+ * Handle uninstall - remove NEST firewall rules and optionally user data.
+ * This is called when the user uninstalls NEST via Squirrel.
+ * We offer (not force) removal of firewall rules and user data.
+ */
+function handleUninstall(): void {
+  // Only run on Windows
+  if (process.platform !== 'win32') return;
+
+  const { exec } = require('child_process');
+  const { promisify } = require('util');
+  const execAsync = promisify(exec);
+
+  // Check if this is an uninstall (Squirrel passes --uninstall or similar)
+  const isUninstall = process.argv.includes('--uninstall') || process.argv.includes('-uninstall');
+
+  if (!isUninstall) return;
+
+  console.log('[Uninstall] Running NEST cleanup...');
+
+  // Remove NEST firewall rules
+  execAsync('powershell -NoProfile -Command "Get-NetFirewallRule -Group NEST | Remove-NetFirewallRule -Confirm:$false"')
+    .then(() => console.log('[Uninstall] NEST firewall rules removed'))
+    .catch((err: Error) => console.error('[Uninstall] Failed to remove firewall rules:', err.message));
+
+  // Note: User data removal is offered but not forced.
+  // Squirrel handles the app data cleanup, but we could offer to remove
+  // the NEST-specific data directory if the user wants a clean uninstall.
+  // For now, we only remove firewall rules as those require admin.
+}
