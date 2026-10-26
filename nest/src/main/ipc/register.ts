@@ -234,6 +234,33 @@ export function registerHandlers(
     }
   );
 
+  // Access Workflow
+  createHandler('access.workflow.start', async ({ appId }: { appId: string }) => {
+    const status = await services.securityPolicyManager.startWorkflow(appId);
+    return status;
+  });
+
+  createHandler(
+    'access.workflow.step',
+    async ({
+      appId,
+      step,
+      payload,
+    }: {
+      appId: string;
+      step: number;
+      payload?: Record<string, unknown>;
+    }) => {
+      const result = await services.securityPolicyManager.executeStep(appId, step, payload);
+      return result;
+    }
+  );
+
+  createHandler('access.workflow.status', async ({ appId }: { appId: string }) => {
+    const status = await services.securityPolicyManager.getWorkflowStatus(appId);
+    return status;
+  });
+
   // Health
   createHandler('health.checkNow', async ({ appId }: { appId: string }) => {
     const result = await services.healthMonitor.checkNow(appId);

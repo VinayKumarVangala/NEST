@@ -391,6 +391,63 @@ export interface LaunchConfigWarning {
   field: string;
 }
 
+/** Workflow request/response schemas */
+export const AccessWorkflowStartRequestSchema = z.object({
+  appId: uuidSchema,
+});
+
+export const AccessWorkflowStepRequestSchema = z.object({
+  appId: uuidSchema,
+  step: z.number().int().min(1).max(10),
+  payload: z.record(z.unknown()).optional(),
+});
+
+export const AccessWorkflowStepResponseSchema = z.object({
+  step: z.object({
+    step: z.number().int().min(1).max(10),
+    name: z.string(),
+    status: z.enum(['pending', 'running', 'completed', 'failed', 'skipped']),
+    details: z.record(z.unknown()),
+    error: z.string().optional(),
+  }),
+  nextStep: z.number().int().min(1).max(10).optional(),
+  workflow: z.object({
+    appId: uuidSchema,
+    currentStep: z.number().int().min(0).max(10),
+    steps: z.array(
+      z.object({
+        step: z.number().int().min(1).max(10),
+        name: z.string(),
+        status: z.enum(['pending', 'running', 'completed', 'failed', 'skipped']),
+        details: z.record(z.unknown()),
+        error: z.string().optional(),
+      })
+    ),
+    completed: z.boolean(),
+    error: z.string().optional(),
+  }),
+});
+
+export const AccessWorkflowStatusRequestSchema = z.object({
+  appId: uuidSchema,
+});
+
+export const AccessWorkflowStatusSchema = z.object({
+  appId: uuidSchema,
+  currentStep: z.number().int().min(0).max(10),
+  steps: z.array(
+    z.object({
+      step: z.number().int().min(1).max(10),
+      name: z.string(),
+      status: z.enum(['pending', 'running', 'completed', 'failed', 'skipped']),
+      details: z.record(z.unknown()),
+      error: z.string().optional(),
+    })
+  ),
+  completed: z.boolean(),
+  error: z.string().optional(),
+});
+
 /** Lint launch config for warnings (not errors) */
 export function lintLaunchConfig(config: ApplicationConfig): LaunchConfigWarning[] {
   const warnings: LaunchConfigWarning[] = [];

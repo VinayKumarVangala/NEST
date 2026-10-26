@@ -4,7 +4,9 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import { exec } from 'node:child_process';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import { writeFile, readFile, unlink, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import type {
   ResolvedExecutable,
   ProcessInfo,
@@ -12,6 +14,9 @@ import type {
   NetworkInterfaceInfo,
   NetworkProfile,
   SystemInfo,
+  FirewallRule,
+  FirewallOperationResult,
+  FirewallReconcileResult,
 } from '@shared/types';
 import type { OsAdapter } from '../os-adapter';
 
@@ -147,7 +152,9 @@ export class WindowsAdapter implements OsAdapter {
   private validateArgsForCmd(args: string[]): void {
     for (const arg of args) {
       if (WindowsAdapter.METACHAR_REGEX.test(arg)) {
-        throw new Error(`Argument contains shell metacharacters (not allowed with .cmd/.bat): ${arg}`);
+        throw new Error(
+          `Argument contains shell metacharacters (not allowed with .cmd/.bat): ${arg}`
+        );
       }
       if (arg.includes('\n') || arg.includes('\r')) {
         throw new Error('Argument contains newline characters');
@@ -345,13 +352,45 @@ export class WindowsAdapter implements OsAdapter {
 
           let type: NetworkInterfaceInfo['type'] = 'Other';
           const desc = config.InterfaceDescription.toLowerCase();
-          if (desc.includes('wi-fi') || desc.includes('wireless') || desc.includes('802.11')) type = 'WiFi';
-          else if (desc.includes('ethernet') && !desc.includes('virtual') && !desc.includes('vmware') && !desc.includes('hyper-v')) type = 'Ethernet';
-          else if (desc.includes('vpn') || desc.includes('tap') || desc.includes('tun') || desc.includes('wintun') || desc.includes('openvpn') || desc.includes('wireguard')) type = 'VPN';
-          else if (desc.includes('virtual') || desc.includes('vmware') || desc.includes('hyper-v') || desc.includes('docker') || desc.includes('veth')) type = 'Virtual';
 
-          const networkProfile = (profileMap.get(config.InterfaceAlias) as NetworkProfile) || 'Unknown';
-          const isRecommended = type === 'Ethernet' || type === 'WiFi';
+          // Classify interface type with improved detection
+          if (desc.includes('wi-fi') || desc.includes('wireless') || desc.includes('802.11')) {
+            type = 'WiFi';
+          } else if (
+            desc.includes('ethernet') &&
+            !desc.includes('virtual') &&
+            !desc.includes('vmware') &&
+            !desc.includes('hyper-v') &&
+            !desc.includes('docker') &&
+            !desc.includes('veth')
+          ) {
+            type = 'Ethernet';
+          } else if (
+            desc.includes('vpn') ||
+            desc.includes('tap') ||
+            desc.includes('tun') ||
+            desc.includes('wintun') ||
+            desc.includes('openvpn') ||
+            desc.includes('wireguard')
+          ) {
+            type = 'VPN';
+          } else if (
+            desc.includes('virtual') ||
+            desc.includes('vmware') ||
+            desc.includes('hyper-v') ||
+            desc.includes('docker') ||
+            desc.includes('veth') ||
+            desc.includes('loopback')
+          ) {
+            type = 'Virtual';
+          }
+
+          const networkProfile =
+            (profileMap.get(config.InterfaceAlias) as NetworkProfile) || 'Unknown';
+
+          // isRecommended: only Ethernet and WiFi on Private networks are recommended for LAN access
+          const isRecommended =
+            (type === 'Ethernet' || type === 'WiFi') && networkProfile === 'Private';
 
           interfaces.push({
             name: config.InterfaceAlias,
@@ -398,6 +437,186 @@ export class WindowsAdapter implements OsAdapter {
       isElevated,
       userDataPath: (await import('electron')).app.getPath('userData'),
     };
+  }
+
+  /**
+   * Get the path to the firewall helper script
+   */
+  private getFirewallHelperPath(): string {
+    const basePath =
+      process.env.NODE_ENV === 'development'
+        ? join(__dirname, '..', '..', '..', 'resources')
+        : join(process.resourcesPath, 'resources');
+    return join(basePath, 'firewall-helper.ps1');
+  }
+
+  /**
+   * Run the firewall helper script with the given parameters
+   */
+  private async runFirewallHelper(
+    operation: string,
+    params: Record<string, any>,
+    elevated: boolean
+  ): Promise<any> {
+    const helperPath = this.getFirewallHelperPath();
+
+    // Create a temp directory with restricted ACL for input/output files
+    const tempDir = await mkdtemp(join(tmpdir(), 'nest-fw-'));
+    const inputPath = join(tempDir, 'input.json');
+    const outputPath = join(tempDir, 'output.json');
+
+    try {
+      // Write input parameters to temp file
+      await writeFile(inputPath, JSON.stringify(params), { encoding: 'utf8' });
+
+      // Build the PowerShell command
+      const psArgs = [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        `"${this.getFirewallHelperPath()}"`,
+        '-Operation',
+        operation,
+        ...Object.entries(params).flatMap(([key, value]) =>
+          value !== undefined ? ['-' + key, typeof value === 'string' ? `"${value}"` : value] : []
+        ),
+        '-OutputPath',
+        `"${outputPath}"`,
+      ].join(' ');
+
+      if (elevated) {
+        // For elevated operations, use Start-Process with -Verb RunAs
+        const scriptPath = join(tempDir, 'elevated.ps1');
+        const psScript = `Start-Process powershell -ArgumentList ${psArgs} -Verb RunAs -Wait`;
+        await writeFile(scriptPath, psScript, { encoding: 'utf8' });
+
+        const { stderr } = await execAsync(
+          `powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`,
+          {
+            timeout: 30000,
+          }
+        );
+
+        if (stderr && stderr.includes('Access is denied')) {
+          throw new Error('ELEVATION_DENIED');
+        }
+      } else {
+        // Non-elevated execution
+        const { stderr } = await execAsync(
+          `powershell -NoProfile -ExecutionPolicy Bypass ${psArgs}`,
+          {
+            timeout: 30000,
+          }
+        );
+
+        if (stderr && stderr.includes('Access is denied')) {
+          throw new Error('ELEVATION_DENIED');
+        }
+      }
+
+      // Read the output file
+      try {
+        const outputContent = await readFile(outputPath, 'utf8');
+        return JSON.parse(outputContent);
+      } catch {
+        throw new Error('Failed to read firewall helper output');
+      }
+    } finally {
+      // Cleanup temp directory
+      try {
+        await unlink(inputPath).catch(() => {});
+        await unlink(outputPath).catch(() => {});
+        await unlink(join(tempDir, 'elevated.ps1')).catch(() => {});
+        await unlink(tempDir).catch(() => {});
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }
+
+  // ========== FIREWALL OPERATIONS ==========
+
+  async firewallAddRule(params: {
+    appId: string;
+    name: string;
+    port: number;
+    remoteAddress: string;
+  }): Promise<FirewallOperationResult> {
+    const selectedInterfaceIp = await this.getSelectedInterfaceIp();
+    const remoteSubnet = this.calculateRemoteSubnet(selectedInterfaceIp);
+
+    const result = await this.runFirewallHelper(
+      'Add-NestRule',
+      {
+        AppId: params.appId,
+        Port: params.port,
+        Protocol: 'TCP',
+        RemoteSubnet: remoteSubnet,
+        Profile: 'Private',
+      },
+      true
+    );
+
+    return result;
+  }
+
+  async firewallRemoveRule(appId: string): Promise<FirewallOperationResult> {
+    const result = await this.runFirewallHelper(
+      'Remove-NestRule',
+      {
+        AppId: appId,
+      },
+      true
+    );
+
+    return result;
+  }
+
+  async firewallGetRule(appId: string): Promise<{ exists: boolean; rule?: any; error?: string }> {
+    const result = await this.runFirewallHelper(
+      'Get-NestRule',
+      {
+        AppId: appId,
+      },
+      false
+    );
+
+    return result;
+  }
+
+  async firewallListRules(): Promise<any[]> {
+    const result = await this.runFirewallHelper('List-NestRules', {}, false);
+    return result.rules || [];
+  }
+
+  async firewallGetActiveProfile(): Promise<NetworkProfile> {
+    const result = await this.runFirewallHelper('Get-ActiveProfile', {}, false);
+    return (result.profile as NetworkProfile) || 'Unknown';
+  }
+
+  async firewallReconcileRules(expectedRules: any[]): Promise<FirewallReconcileResult> {
+    const result = await this.runFirewallHelper(
+      'ReconcileRules',
+      {
+        ExpectedRulesJson: JSON.stringify(expectedRules),
+      },
+      false
+    );
+
+    return result;
+  }
+
+  // Helper methods
+  private async getSelectedInterfaceIp(): Promise<string | undefined> {
+    return undefined;
+  }
+
+  private calculateRemoteSubnet(selectedInterfaceIp?: string): string {
+    if (!selectedInterfaceIp) {
+      return 'LocalSubnet';
+    }
+    return 'LocalSubnet';
   }
 
   private async checkElevation(): Promise<boolean> {

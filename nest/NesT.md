@@ -335,9 +335,8 @@ Important distinction: If NEST itself exits, processes it launched may continue 
 
 Later, we can add an optional Windows background service if you need applications to survive NEST closing, user logoff, or other desktop-session changes. That requires a separate service architecture and stronger permission controls.
 
+### Background Execution and Supervision:
 
-
-### Background Execution and Supervision: 
 NEST shall launch registered applications as background processes without requiring users to open or maintain terminal windows. It shall capture standard output and errors, track process identifiers and relevant child processes, monitor application health, and provide controlled start, stop, and restart operations. NEST shall support system-tray operation so managed applications can remain available while the main window is closed. Process persistence after NEST exits, Windows logoff, or system reboot shall be handled through explicitly configured mechanisms rather than assumed.
 
 The lifecycle manager is responsible for launching and supervising registered applications.

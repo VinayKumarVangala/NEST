@@ -27,7 +27,16 @@ vi.mock('electron', () => ({
 }));
 
 // Import after mocking
-import { initializeDatabase, getDatabase, closeDatabase, ApplicationRepository, RuntimeStateRepository, AccessPolicyRepository, ActivityLogRepository, SettingsRepository } from '../../src/main/db';
+import {
+  initializeDatabase,
+  getDatabase,
+  closeDatabase,
+  ApplicationRepository,
+  RuntimeStateRepository,
+  AccessPolicyRepository,
+  ActivityLogRepository,
+  SettingsRepository,
+} from '../../src/main/db';
 
 const TEST_DB_DIR = '/tmp/nest-test-data';
 const TEST_DB_PATH = '/tmp/nest-test-data/nest.db';
@@ -77,10 +86,14 @@ describe('better-sqlite3 Integration', () => {
     });
 
     it('should have all required tables', () => {
-      const tables = db.prepare(`
+      const tables = db
+        .prepare(
+          `
         SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'
-      `).all() as { name: string }[];
-      const tableNames = tables.map(t => t.name);
+      `
+        )
+        .all() as { name: string }[];
+      const tableNames = tables.map((t) => t.name);
       expect(tableNames).toContain('applications');
       expect(tableNames).toContain('runtime_state');
       expect(tableNames).toContain('access_policies');
@@ -90,7 +103,9 @@ describe('better-sqlite3 Integration', () => {
     });
 
     it('should have migration version 1 applied', () => {
-      const migrations = db.prepare('SELECT * FROM schema_migrations').all() as { version: number }[];
+      const migrations = db.prepare('SELECT * FROM schema_migrations').all() as {
+        version: number;
+      }[];
       expect(migrations.length).toBe(1);
       expect(migrations[0].version).toBe(1);
     });
@@ -113,7 +128,12 @@ describe('better-sqlite3 Integration', () => {
       expectedListenAddress: 'loopback' as const,
       lifecycleMode: 'managed' as const,
       startupTimeoutMs: 30000,
-      healthCheck: { type: 'none' as const, intervalMs: 30000, timeoutMs: 5000, failureThreshold: 3 },
+      healthCheck: {
+        type: 'none' as const,
+        intervalMs: 30000,
+        timeoutMs: 5000,
+        failureThreshold: 3,
+      },
       createdAt: Date.now(),
       updatedAt: Date.now(),
       ...overrides,
@@ -131,9 +151,11 @@ describe('better-sqlite3 Integration', () => {
     it('should encrypt secret env values in storage', () => {
       const app = createTestApp();
       ApplicationRepository.create(app);
-      
+
       // Check raw database - secret should be encrypted
-      const row = db.prepare('SELECT env FROM applications WHERE id = ?').get(app.id) as { env: string };
+      const row = db.prepare('SELECT env FROM applications WHERE id = ?').get(app.id) as {
+        env: string;
+      };
       const env = JSON.parse(row.env);
       const secretEnv = env.find((e: any) => e.key === 'API_KEY');
       expect(secretEnv.value).not.toBe('secret123');
@@ -144,25 +166,25 @@ describe('better-sqlite3 Integration', () => {
     it('should redact secrets when retrieving for renderer', () => {
       const app = createTestApp();
       ApplicationRepository.create(app);
-      
+
       const retrieved = ApplicationRepository.get(app.id);
-      const secretEnv = retrieved!.env.find(e => e.key === 'API_KEY');
+      const secretEnv = retrieved!.env.find((e) => e.key === 'API_KEY');
       expect(secretEnv!.value).toBe('••••');
     });
 
     it('should decrypt secrets for ApplicationManager launch path', () => {
       const app = createTestApp();
       ApplicationRepository.create(app);
-      
+
       const retrieved = ApplicationRepository.getForLaunch(app.id);
-      const secretEnv = retrieved!.env.find(e => e.key === 'API_KEY');
+      const secretEnv = retrieved!.env.find((e) => e.key === 'API_KEY');
       expect(secretEnv!.value).toBe('secret123');
     });
 
     it('should update application', () => {
       const app = createTestApp();
       ApplicationRepository.create(app);
-      
+
       ApplicationRepository.update(app.id, { name: 'Updated Name', port: 4000 });
       const retrieved = ApplicationRepository.get(app.id);
       expect(retrieved!.name).toBe('Updated Name');
@@ -172,13 +194,13 @@ describe('better-sqlite3 Integration', () => {
     it('should delete application and cascade delete runtime_state and access_policies', () => {
       const app = createTestApp();
       ApplicationRepository.create(app);
-      
+
       // Verify related records exist
       expect(RuntimeStateRepository.get(app.id)).not.toBeNull();
       expect(AccessPolicyRepository.get(app.id)).not.toBeNull();
-      
+
       ApplicationRepository.delete(app.id);
-      
+
       // Verify cascaded deletes
       expect(ApplicationRepository.get(app.id)).toBeNull();
       expect(RuntimeStateRepository.get(app.id)).toBeNull();
@@ -190,7 +212,7 @@ describe('better-sqlite3 Integration', () => {
       const app2 = createTestApp({ id: 'app-2', name: 'App 2' });
       ApplicationRepository.create(app1);
       ApplicationRepository.create(app2);
-      
+
       const apps = ApplicationRepository.list();
       expect(apps.length).toBeGreaterThanOrEqual(2);
     });
@@ -206,13 +228,18 @@ describe('better-sqlite3 Integration', () => {
         processStartTime: Date.now(),
         portState: 'listening_loopback' as const,
         listenerAddress: '127.0.0.1',
-        lastHealthCheck: { timestamp: Date.now(), processAlive: true, portListening: true, localResponding: true },
+        lastHealthCheck: {
+          timestamp: Date.now(),
+          processAlive: true,
+          portListening: true,
+          localResponding: true,
+        },
         lastError: undefined,
         startedAt: Date.now(),
         stoppedAt: undefined,
         updatedAt: Date.now(),
       };
-      
+
       RuntimeStateRepository.upsert(state);
       const retrieved = RuntimeStateRepository.get('test-app-1');
       expect(retrieved).not.toBeNull();
@@ -228,7 +255,7 @@ describe('better-sqlite3 Integration', () => {
         portState: 'free',
         updatedAt: Date.now(),
       });
-      
+
       RuntimeStateRepository.upsert({
         appId: 'test-app-2',
         processState: 'running',
@@ -236,7 +263,7 @@ describe('better-sqlite3 Integration', () => {
         portState: 'listening_loopback',
         updatedAt: Date.now(),
       });
-      
+
       const retrieved = RuntimeStateRepository.get('test-app-2');
       expect(retrieved!.processState).toBe('running');
       expect(retrieved!.healthState).toBe('healthy');
@@ -258,11 +285,16 @@ describe('better-sqlite3 Integration', () => {
         expectedListenAddress: 'loopback' as const,
         lifecycleMode: 'managed' as const,
         startupTimeoutMs: 30000,
-        healthCheck: { type: 'none' as const, intervalMs: 30000, timeoutMs: 5000, failureThreshold: 3 },
+        healthCheck: {
+          type: 'none' as const,
+          intervalMs: 30000,
+          timeoutMs: 5000,
+          failureThreshold: 3,
+        },
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-      
+
       ApplicationRepository.create(app);
       const policy = AccessPolicyRepository.get(app.id);
       expect(policy).not.toBeNull();
@@ -279,16 +311,16 @@ describe('better-sqlite3 Integration', () => {
         lastVerificationAt: Date.now(),
         updatedAt: Date.now(),
       });
-      
+
       let policy = AccessPolicyRepository.get('policy-test-2');
       expect(policy!.mode).toBe('lan_enabled');
-      
+
       AccessPolicyRepository.upsert({
         appId: 'policy-test-2',
         mode: 'lan_disabled',
         updatedAt: Date.now(),
       });
-      
+
       policy = AccessPolicyRepository.get('policy-test-2');
       expect(policy!.mode).toBe('lan_disabled');
     });
@@ -305,7 +337,7 @@ describe('better-sqlite3 Integration', () => {
         details: { pid: 123 },
         timestamp: Date.now(),
       });
-      
+
       const result = ActivityLogRepository.query({ limit: 10, offset: 0 });
       expect(result.entries.length).toBeGreaterThan(0);
       expect(result.entries[0].message).toBe('Application started');
@@ -321,9 +353,9 @@ describe('better-sqlite3 Integration', () => {
         message: 'App 2 started',
         timestamp: Date.now(),
       });
-      
+
       const result = ActivityLogRepository.query({ appId: 'app-1', limit: 10, offset: 0 });
-      expect(result.entries.every(e => e.appId === 'app-1')).toBe(true);
+      expect(result.entries.every((e) => e.appId === 'app-1')).toBe(true);
     });
 
     it('should filter logs by severity', () => {
@@ -335,9 +367,9 @@ describe('better-sqlite3 Integration', () => {
         message: 'Something failed',
         timestamp: Date.now(),
       });
-      
+
       const result = ActivityLogRepository.query({ severity: ['error'], limit: 10, offset: 0 });
-      expect(result.entries.every(e => e.severity === 'error')).toBe(true);
+      expect(result.entries.every((e) => e.severity === 'error')).toBe(true);
     });
   });
 
@@ -374,16 +406,21 @@ describe('better-sqlite3 Integration', () => {
         expectedListenAddress: 'loopback' as const,
         lifecycleMode: 'managed' as const,
         startupTimeoutMs: 30000,
-        healthCheck: { type: 'none' as const, intervalMs: 30000, timeoutMs: 5000, failureThreshold: 3 },
+        healthCheck: {
+          type: 'none' as const,
+          intervalMs: 30000,
+          timeoutMs: 5000,
+          failureThreshold: 3,
+        },
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-      
+
       ApplicationRepository.create(app);
-      
+
       // Read raw database file
       const dbContent = require('node:fs').readFileSync('/tmp/nest-test-data/nest.db', 'utf8');
-      
+
       // Secrets should not appear in plaintext
       expect(dbContent).not.toContain('supersecret');
       expect(dbContent).not.toContain('mytoken123');

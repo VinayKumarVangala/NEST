@@ -11,7 +11,7 @@ When the user clicks the close button on the main window:
 1. The window is hidden (not closed)
 2. The application continues running in the system tray
 3. All managed applications continue running
-4. A one-time notice is shown: *"NEST has been minimized to the tray. Managed applications will continue running."*
+4. A one-time notice is shown: _"NEST has been minimized to the tray. Managed applications will continue running."_
 5. User can dismiss this notice permanently via "Don't show this again" checkbox
 
 **To disable:** Set `backgroundMode: false` in Settings → Application Behavior
@@ -28,12 +28,12 @@ When the user clicks the close button on the main window:
 
 The system tray icon provides:
 
-| Menu Item | Action |
-|-----------|--------|
-| **Open NEST** | Shows the main window |
-| **Running Apps** | Lists all running managed apps with Stop/Start/Restart actions |
-| **Review Warnings** | Opens NEST to the Diagnostics page |
-| **Exit** | Triggers the shutdown policy flow |
+| Menu Item           | Action                                                         |
+| ------------------- | -------------------------------------------------------------- |
+| **Open NEST**       | Shows the main window                                          |
+| **Running Apps**    | Lists all running managed apps with Stop/Start/Restart actions |
+| **Review Warnings** | Opens NEST to the Diagnostics page                             |
+| **Exit**            | Triggers the shutdown policy flow                              |
 
 ### Tray Interactions
 
@@ -52,15 +52,15 @@ Controls what happens when the user selects "Exit" from the tray menu or attempt
 When the user selects "Exit":
 
 1. If managed apps are running:
-   - Dialog shows: *"Managed applications are still running: [list]. What would you like to do?"*
+   - Dialog shows: _"Managed applications are still running: [list]. What would you like to do?"_
    - Options:
      - **Stop All Apps & Exit** (default) - Gracefully stops all apps, then quits
      - **Keep Apps Running & Exit** - Leaves apps running, quits NEST only
      - **Cancel** - Returns to NEST, no changes
-   - Checkbox: *"Remember my choice"* - Updates `shutdownPolicy` setting
+   - Checkbox: _"Remember my choice"_ - Updates `shutdownPolicy` setting
 
 2. If no managed apps are running:
-   - Dialog shows: *"No managed applications are running. What would you like to do?"*
+   - Dialog shows: _"No managed applications are running. What would you like to do?"_
    - Default option: **Cancel** (safe default)
 
 ### `stop_all`
@@ -108,12 +108,12 @@ When enabled in Settings → Application Behavior:
 
 ## Settings Summary
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `backgroundMode` | `true` | Hide to tray on close |
-| `shutdownPolicy` | `'ask'` | Exit behavior: ask/stop_all/keep_running |
-| `startupAtLogin` | `false` | Start at Windows login |
-| `trayNoticeDismissed` | `false` | One-time tray notice dismissed |
+| Setting               | Default | Description                              |
+| --------------------- | ------- | ---------------------------------------- |
+| `backgroundMode`      | `true`  | Hide to tray on close                    |
+| `shutdownPolicy`      | `'ask'` | Exit behavior: ask/stop_all/keep_running |
+| `startupAtLogin`      | `false` | Start at Windows login                   |
+| `trayNoticeDismissed` | `false` | One-time tray notice dismissed           |
 
 ---
 
@@ -133,17 +133,20 @@ This allows `keep_running` shutdown policy to work correctly across NEST restart
 ## Platform-Specific Notes
 
 ### Windows
+
 - Tray icon: 16x16px PNG
 - Startup at login: `app.setLoginItemSettings()` (user-level)
 - Tray double-click: Opens NEST
 - Right-click: Context menu
 
 ### macOS
+
 - Dock icon hidden when minimized to tray
 - Tray icon: Template image (not implemented yet)
 - `app.dock.hide()` called on minimize
 
 ### Linux
+
 - System tray support depends on desktop environment
 - AppIndicator support needed (not implemented yet)
 
@@ -151,6 +154,6 @@ This allows `keep_running` shutdown policy to work correctly across NEST restart
 
 ## Change Log
 
-| Version | Changes |
-|---------|---------|
-| 0.1.0 | Initial behavior implementation |
+| Version | Changes                         |
+| ------- | ------------------------------- |
+| 0.1.0   | Initial behavior implementation |

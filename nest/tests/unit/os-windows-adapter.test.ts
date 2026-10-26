@@ -10,7 +10,7 @@ describe('WindowsAdapter - Pure Logic Tests', () => {
       const isAbsolutePath = (path: string): boolean => {
         return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\');
       };
-      
+
       expect(isAbsolutePath('C:\\path\\to\\file')).toBe(true);
       expect(isAbsolutePath('D:/path/to/file')).toBe(true);
       expect(isAbsolutePath('\\\\server\\share')).toBe(true);
@@ -20,7 +20,7 @@ describe('WindowsAdapter - Pure Logic Tests', () => {
       const isAbsolutePath = (path: string): boolean => {
         return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\');
       };
-      
+
       expect(isAbsolutePath('relative\\path')).toBe(false);
       expect(isAbsolutePath('./relative')).toBe(false);
       expect(isAbsolutePath('bin\\app')).toBe(false);
@@ -30,7 +30,7 @@ describe('WindowsAdapter - Pure Logic Tests', () => {
       const isAbsolutePath = (path: string): boolean => {
         return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\');
       };
-      
+
       expect(isAbsolutePath('notepad')).toBe(false);
       expect(isAbsolutePath('npm')).toBe(false);
     });
@@ -39,7 +39,7 @@ describe('WindowsAdapter - Pure Logic Tests', () => {
       const isAbsolutePath = (path: string): boolean => {
         return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\');
       };
-      
+
       expect(isAbsolutePath('C:\\Users\\test')).toBe(true);
       expect(isAbsolutePath('D:/folder/file')).toBe(true);
       expect(isAbsolutePath('\\\\server\\share')).toBe(true);
@@ -51,7 +51,7 @@ describe('WindowsAdapter - Pure Logic Tests', () => {
   describe('METACHAR_REGEX', () => {
     it('detects shell metacharacters', () => {
       const METACHAR_REGEX = /[&|<>^%!"\n\r]/;
-      
+
       expect(METACHAR_REGEX.test('value&other')).toBe(true);
       expect(METACHAR_REGEX.test('value|other')).toBe(true);
       expect(METACHAR_REGEX.test('value<other')).toBe(true);
@@ -85,7 +85,7 @@ describe('WindowsAdapter - Pure Logic Tests', () => {
         const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
         return [(mask >>> 24) & 255, (mask >>> 16) & 255, (mask >>> 8) & 255, mask & 255].join('.');
       };
-      
+
       expect(prefixToSubnet(24)).toBe('255.255.255.0');
       expect(prefixToSubnet(16)).toBe('255.255.0.0');
       expect(prefixToSubnet(8)).toBe('255.0.0.0');

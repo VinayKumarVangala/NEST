@@ -12,16 +12,16 @@ The project brief (`NesT.md`) is the product spec. This plan is the execution sp
 
 ### 0.1 Fixed stack (do not substitute)
 
-| Layer | Choice |
-|---|---|
-| Desktop runtime | Electron (main + sandboxed renderer + preload) |
-| Frontend | React + TypeScript + Tailwind CSS |
-| Backend (in main process) | Node.js + TypeScript |
-| DB | SQLite via `better-sqlite3` |
-| Validation | Zod (every IPC payload, every config object) |
-| Tests | Vitest (unit/integration), Playwright (Electron UI) |
-| Packaging | Electron Forge (Windows installer) |
-| Windows firewall | Windows Defender Firewall with Advanced Security, via a **controlled PowerShell helper** |
+| Layer                     | Choice                                                                                   |
+| ------------------------- | ---------------------------------------------------------------------------------------- |
+| Desktop runtime           | Electron (main + sandboxed renderer + preload)                                           |
+| Frontend                  | React + TypeScript + Tailwind CSS                                                        |
+| Backend (in main process) | Node.js + TypeScript                                                                     |
+| DB                        | SQLite via `better-sqlite3`                                                              |
+| Validation                | Zod (every IPC payload, every config object)                                             |
+| Tests                     | Vitest (unit/integration), Playwright (Electron UI)                                      |
+| Packaging                 | Electron Forge (Windows installer)                                                       |
+| Windows firewall          | Windows Defender Firewall with Advanced Security, via a **controlled PowerShell helper** |
 
 ### 0.2 Hard security invariants (every prompt must respect these)
 
@@ -422,7 +422,7 @@ Acceptance: tests with a mocked PowerShell runner for argument validation (injec
 Implement services/security-policy + `access.enable/disable/getStatus` following the brief §6.6 workflow EXACTLY (10 steps), as a resumable orchestrated flow with a typed step result list the UI can render:
 
 1. Preconditions: app registered; interface selected; network profile Private (else block).
-2. Verify listening address/port (Prompt 3.2). If loopback_only → branch: offer lanLaunchProfile restart (managed) or manual instructions (external). 
+2. Verify listening address/port (Prompt 3.2). If loopback_only → branch: offer lanLaunchProfile restart (managed) or manual instructions (external).
 3. Produce a **Change Plan** object (no side effects): selected interface/IP, port, proposed firewall rule (exact fields), whether a restart is needed, whether elevation is needed, risk notes (debug endpoints, sample credentials, no auth).
 4. UI shows a confirmation dialog rendering the Change Plan; requires an explicit checkbox/typed confirmation. (Setting "confirmation preferences" may reduce repeat prompts for the same unchanged plan but never skip the first confirmation.)
 5. Apply: restart (if needed) → add firewall rule → read-back verification.
@@ -533,14 +533,14 @@ P0 Scaffold/Contracts ──► P1 Foundation (DB → OsAdapter/process → AppM
 
 Cross-phase integration points (agent must wire these when reaching the later prompt):
 
-| Defined in | Consumed by |
-|---|---|
-| `PortGuard` hook (1.3 stub) | PortManager (2.1) |
-| Runtime state + events (1.3) | HealthMonitor (2.2), Tray (1.6), Dashboard (1.5) |
-| `OsAdapter.getNetworkInterfaces/firewall` interface (1.2) | NetworkManager (3.1), Firewall (3.3) |
-| `bindingClass` (3.2) | AccessManager (3.4), Diagnostics (3.5) |
-| Activity log (1.4) | Audit view (4.4), Diagnostics, Logs UI |
-| Shutdown policy + pid/startTime persistence (1.3/1.6) | Recovery (2.4) |
+| Defined in                                                | Consumed by                                      |
+| --------------------------------------------------------- | ------------------------------------------------ |
+| `PortGuard` hook (1.3 stub)                               | PortManager (2.1)                                |
+| Runtime state + events (1.3)                              | HealthMonitor (2.2), Tray (1.6), Dashboard (1.5) |
+| `OsAdapter.getNetworkInterfaces/firewall` interface (1.2) | NetworkManager (3.1), Firewall (3.3)             |
+| `bindingClass` (3.2)                                      | AccessManager (3.4), Diagnostics (3.5)           |
+| Activity log (1.4)                                        | Audit view (4.4), Diagnostics, Logs UI           |
+| Shutdown policy + pid/startTime persistence (1.3/1.6)     | Recovery (2.4)                                   |
 
 ---
 

@@ -21,7 +21,11 @@ test.describe('IPC Layer', () => {
   test('renderer cannot access ipcRenderer', async ({ page }) => {
     const hasIpcRenderer = await page.evaluate(() => {
       // @ts-ignore
-      return typeof require === 'function' || typeof process !== 'undefined' || typeof ipcRenderer !== 'undefined';
+      return (
+        typeof require === 'function' ||
+        typeof process !== 'undefined' ||
+        typeof ipcRenderer !== 'undefined'
+      );
     });
     expect(hasIpcRenderer).toBe(false);
   });

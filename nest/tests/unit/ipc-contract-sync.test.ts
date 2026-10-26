@@ -3,9 +3,28 @@
  * This test ensures that the NestAPI interface matches the RequestChannels/EventChannels
  * If this file fails to compile, the IPC contract and preload API are out of sync.
  */
-import type { NestAPI, RequestChannelName, EventChannelName, RequestOf, ResponseOf } from '@shared/ipc-contract';
+import type {
+  NestAPI,
+  RequestChannelName,
+  EventChannelName,
+  RequestOf,
+  ResponseOf,
+} from '@shared/ipc-contract';
 import type { RequestChannels, EventChannels } from '@shared/ipc-contract';
-import type { Result, ApplicationConfig, RuntimeState, PortInfo, NetworkInterfaceInfo, AccessPolicy, HealthCheckResult, DiagnosticReport, ActivityLogEntry, SystemInfo, ListenerInfo, LaunchConfigWarning } from '@shared/ipc-contract';
+import type {
+  Result,
+  ApplicationConfig,
+  RuntimeState,
+  PortInfo,
+  NetworkInterfaceInfo,
+  AccessPolicy,
+  HealthCheckResult,
+  DiagnosticReport,
+  ActivityLogEntry,
+  SystemInfo,
+  ListenerInfo,
+  LaunchConfigWarning,
+} from '@shared/ipc-contract';
 
 /** Test that all RequestChannels have correct request/response types */
 type TestAppsListRequest = RequestOf<'apps.list'>; // should be void
@@ -82,7 +101,13 @@ type TestSystemInfoResponse = ResponseOf<'system.info'>; // should be Result<Sys
 
 /** Verify EventChannels match NestAPI on/off types */
 type TestEventChannelsCovered = {
-  [K in EventChannelName]: K extends 'app.stateChanged' | 'app.log' | 'health.changed' | 'network.changed' | 'port.conflict' | 'firewall.changed'
+  [K in EventChannelName]: K extends
+    | 'app.stateChanged'
+    | 'app.log'
+    | 'health.changed'
+    | 'network.changed'
+    | 'port.conflict'
+    | 'firewall.changed'
     ? true
     : false;
 };
@@ -90,7 +115,9 @@ type TestEventChannelsCovered = {
 /** Verify Result type is properly used in responses */
 type TestResultType = Result<ApplicationConfig>;
 type TestResultOk = TestResultType extends { ok: true; data: ApplicationConfig } ? true : false;
-type TestResultErr = TestResultType extends { ok: false; error: { code: string; message: string } } ? true : false;
+type TestResultErr = TestResultType extends { ok: false; error: { code: string; message: string } }
+  ? true
+  : false;
 
 // If this file compiles, the IPC contract and preload API are in sync
 // We declare variables without initializing to avoid runtime code

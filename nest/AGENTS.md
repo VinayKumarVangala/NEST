@@ -4,16 +4,16 @@ The project brief (`NesT.md`) is the product spec. This plan is the execution sp
 
 ### 0.1 Fixed stack (do not substitute)
 
-| Layer | Choice |
-|---|---|
-| Desktop runtime | Electron (main + sandboxed renderer + preload) |
-| Frontend | React + TypeScript + Tailwind CSS |
-| Backend (in main process) | Node.js + TypeScript |
-| DB | SQLite via `better-sqlite3` |
-| Validation | Zod (every IPC payload, every config object) |
-| Tests | Vitest (unit/integration), Playwright (Electron UI) |
-| Packaging | Electron Forge (Windows installer) |
-| Windows firewall | Windows Defender Firewall with Advanced Security, via a **controlled PowerShell helper** |
+| Layer                     | Choice                                                                                   |
+| ------------------------- | ---------------------------------------------------------------------------------------- |
+| Desktop runtime           | Electron (main + sandboxed renderer + preload)                                           |
+| Frontend                  | React + TypeScript + Tailwind CSS                                                        |
+| Backend (in main process) | Node.js + TypeScript                                                                     |
+| DB                        | SQLite via `better-sqlite3`                                                              |
+| Validation                | Zod (every IPC payload, every config object)                                             |
+| Tests                     | Vitest (unit/integration), Playwright (Electron UI)                                      |
+| Packaging                 | Electron Forge (Windows installer)                                                       |
+| Windows firewall          | Windows Defender Firewall with Advanced Security, via a **controlled PowerShell helper** |
 
 ### 0.2 Hard security invariants (every prompt must respect these)
 

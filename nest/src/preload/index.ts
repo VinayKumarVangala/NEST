@@ -48,6 +48,11 @@ const nestAPI: NestAPI = {
     enable: (appId, confirmation) => invoke('access.enable', { appId, confirmation }),
     disable: (appId, restartWithLocalProfile = false) =>
       invoke('access.disable', { appId, restartWithLocalProfile }),
+    workflow: {
+      start: (appId) => invoke('access.workflow.start', { appId }),
+      step: (appId, step, payload) => invoke('access.workflow.step', { appId, step, payload }),
+      status: (appId) => invoke('access.workflow.status', { appId }),
+    },
   },
   health: {
     checkNow: (appId) => invoke('health.checkNow', { appId }),

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { nest } from '@renderer/lib/ipc';
 import type { ApplicationConfig } from '@shared/types';
@@ -8,6 +9,7 @@ import { FolderPicker } from '@renderer/components/FolderPicker';
 
 export function Projects() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [showWizard, setShowWizard] = useState(false);
   const [selectedAppForRemoval, setSelectedAppForRemoval] = useState<string | null>(null);
 
@@ -36,6 +38,10 @@ export function Projects() {
       setSelectedAppForRemoval(null);
     },
   });
+
+  const handleViewDetails = (appId: string) => {
+    navigate(`/projects/${appId}`);
+  };
 
   if (isLoading) {
     return (
@@ -86,7 +92,12 @@ export function Projects() {
         ) : (
           <div className="divide-y divide-slate-200 dark:divide-slate-700">
             {apps?.map((app) => (
-              <ProjectRow key={app.id} app={app} onRemove={setSelectedAppForRemoval} />
+              <ProjectRow
+                key={app.id}
+                app={app}
+                onRemove={setSelectedAppForRemoval}
+                onView={handleViewDetails}
+              />
             ))}
           </div>
         )}
@@ -95,12 +106,23 @@ export function Projects() {
   );
 }
 
-function ProjectRow({ app, onRemove }: { app: ApplicationConfig; onRemove: (id: string) => void }) {
+function ProjectRow({
+  app,
+  onRemove,
+  onView,
+}: {
+  app: ApplicationConfig;
+  onRemove: (id: string) => void;
+  onView: (id: string) => void;
+}) {
   const [confirmRemove, setConfirmRemove] = useState(false);
 
   return (
     <div className="p-4 flex items-center justify-between">
-      <div className="flex-1">
+      <div
+        className="flex-1 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+        onClick={() => onView(app.id)}
+      >
         <h3 className="font-medium text-slate-900 dark:text-white">{app.name}</h3>
         <p className="text-sm text-slate-500 dark:text-slate-400">
           {app.executable} {app.args.join(' ')}

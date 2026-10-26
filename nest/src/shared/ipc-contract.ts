@@ -22,6 +22,11 @@ import {
   ProcessInfoSchema,
   ListenerInfoSchema,
   HealthCheckResultSchema,
+  AccessWorkflowStartRequestSchema,
+  AccessWorkflowStepRequestSchema,
+  AccessWorkflowStepResponseSchema,
+  AccessWorkflowStatusRequestSchema,
+  AccessWorkflowStatusSchema,
 } from './schemas';
 import type {
   ApplicationConfig,
@@ -39,8 +44,9 @@ import type {
   HealthCheckResult,
   LaunchConfigWarning,
   LaunchProfile,
-AutoRestartPolicy,
+  AutoRestartPolicy,
   RestartHistoryEntry,
+  AccessWorkflowStatus,
 } from './types';
 
 // Re-export types for consumers
@@ -273,6 +279,23 @@ export const EventChannels = {
     selectedInterface?: string;
     timestamp: number;
   }>,
+  'network.staleUrl': z.object({
+    appId: uuidSchema,
+    appName: z.string(),
+    oldIp: z.string(),
+    newIp: z.string(),
+    oldUrl: z.string(),
+    newUrl: z.string(),
+    timestamp: z.number().int().positive(),
+  }) as z.ZodType<{
+    appId: string;
+    appName: string;
+    oldIp: string;
+    newIp: string;
+    oldUrl: string;
+    newUrl: string;
+    timestamp: number;
+  }>,
   'port.conflict': z.object({
     appId: uuidSchema,
     port: portSchema,
@@ -430,6 +453,23 @@ export const RequestChannels = {
     makeResultSchema(AccessPolicySchema)
   ),
 
+  // Access Workflow
+  'access.workflow.start': createChannel(
+    'access.workflow.start',
+    AccessWorkflowStartRequestSchema,
+    makeResultSchema(AccessWorkflowStatusSchema)
+  ),
+  'access.workflow.step': createChannel(
+    'access.workflow.step',
+    AccessWorkflowStepRequestSchema,
+    makeResultSchema(AccessWorkflowStepResponseSchema)
+  ),
+  'access.workflow.status': createChannel(
+    'access.workflow.status',
+    AccessWorkflowStatusRequestSchema,
+    makeResultSchema(AccessWorkflowStatusSchema)
+  ),
+
   // Health
   'health.checkNow': createChannel(
     'health.checkNow',
@@ -576,6 +616,7 @@ export interface NestAPI {
         policy: AccessPolicy;
         bindingClass: 'loopback_only' | 'all_interfaces' | 'specific_lan' | 'not_listening';
         lanUrl?: string;
+        isLanEligible: boolean;
         changePlan?: {
           needsRestart: boolean;
           needsElevation: boolean;
@@ -589,6 +630,15 @@ export interface NestAPI {
       confirmation: string
     ): Promise<Result<{ policy: AccessPolicy; lanUrl: string; verification: string }>>;
     disable(appId: string, restartWithLocalProfile?: boolean): Promise<Result<AccessPolicy>>;
+    workflow: {
+      start(appId: string): Promise<Result<AccessWorkflowStatus>>;
+      step(
+        appId: string,
+        step: number,
+        payload?: Record<string, unknown>
+      ): Promise<Result<{ step: any; nextStep?: number; workflow: AccessWorkflowStatus }>>;
+      status(appId: string): Promise<Result<AccessWorkflowStatus>>;
+    };
   };
   health: {
     checkNow(appId: string): Promise<Result<HealthCheckResult>>;
@@ -644,3 +694,24 @@ export interface NestAPI {
 export function isValidChannel(name: string): name is ChannelName {
   return name in EventChannels || name in RequestChannels;
 }
+
+// Re-export workflow types
+export type {
+  StepStatus,
+  AccessWorkflowStatus,
+  AccessWorkflowStartRequest,
+  AccessWorkflowStepRequest,
+  AccessWorkflowStepResponse,
+  AccessWorkflowStatusRequest,
+  WorkflowStep,
+  PreconditionsCheck,
+  BindingCheck,
+  ChangePlan,
+  UserConfirmation,
+  ApplyChanges,
+  LocalVerification,
+  RemoteVerification,
+  PersistPolicy,
+  DisableRollback,
+  Reconciliation,
+} from './types';

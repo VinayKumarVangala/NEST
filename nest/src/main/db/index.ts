@@ -483,7 +483,9 @@ export const RestartHistoryRepository = {
 
   getSince: (appId: string, since: number): RestartHistoryEntry[] => {
     const rows = db!
-      .prepare('SELECT * FROM restart_history WHERE app_id = ? AND attempted_at >= ? ORDER BY attempted_at ASC')
+      .prepare(
+        'SELECT * FROM restart_history WHERE app_id = ? AND attempted_at >= ? ORDER BY attempted_at ASC'
+      )
       .all(appId, since);
     return rows.map(mapRowToRestartHistory);
   },

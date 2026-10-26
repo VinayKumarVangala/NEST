@@ -317,13 +317,15 @@ describe('Logging Service', () => {
   describe('Query Logs', () => {
     it('should delegate to repository query', () => {
       vi.mocked(ActivityLogRepository.query).mockReturnValue({
-        entries: [{
-          id: '1',
-          message: 'test',
-          eventType: 'info',
-          severity: 'info',
-          timestamp: Date.now(),
-        }],
+        entries: [
+          {
+            id: '1',
+            message: 'test',
+            eventType: 'info',
+            severity: 'info',
+            timestamp: Date.now(),
+          },
+        ],
         total: 1,
       });
 

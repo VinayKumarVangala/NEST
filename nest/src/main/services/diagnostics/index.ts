@@ -1,8 +1,14 @@
 /**
  * Diagnostics Service - Health and connectivity diagnostics
+ * Implements steps 1-4 from brief §6.9:
+ * 1. Process running
+ * 2. Port listening
+ * 3. Listener address (binding class)
+ * 4. Local HTTP check
  */
 import type { DiagnosticReport, DiagnosticStep } from '@shared/types';
 import type { Result } from '@shared/types';
+import { RuntimeStateRepository } from '../../db';
 
 export class DiagnosticsService {
   private osAdapter: any;
@@ -35,143 +41,101 @@ export class DiagnosticsService {
     const steps: DiagnosticStep[] = [];
 
     // Step 1: Process running
-    const state = await this.getRuntimeState(appId);
+    const runtimeState = RuntimeStateRepository.get(appId);
+    const processAlive = await this.checkProcessRunning(appId, runtimeState);
     steps.push({
       id: 'process',
       name: 'Process Running',
-      status: state?.processState === 'running' ? 'pass' : 'fail',
-      detail:
-        state?.processState === 'running'
-          ? `Process running (PID: ${state.pid})`
-          : `Process state: ${state?.processState || 'unknown'}`,
-      suggestedAction: state?.processState !== 'running' ? 'Start the application' : undefined,
+      status: processAlive ? 'pass' : 'fail',
+      detail: processAlive
+        ? `Process running (PID: ${runtimeState?.pid})`
+        : `Process state: ${runtimeState?.processState || 'unknown'}`,
+      suggestedAction: processAlive ? undefined : 'Start the application',
     });
 
     // Step 2: Port listening
     const portInfo = await this.portManager.checkPort(app.port);
+    const portListening = portInfo.state !== 'free';
     steps.push({
       id: 'port',
       name: 'Port Listening',
-      status: portInfo.state !== 'free' ? 'pass' : 'fail',
-      detail:
-        portInfo.state !== 'free'
-          ? `Port ${app.port} is listening`
-          : `Port ${app.port} is not listening`,
-      suggestedAction:
-        portInfo.state === 'free' ? 'Check if application started correctly' : undefined,
+      status: portListening ? 'pass' : 'fail',
+      detail: portListening ? `Port ${app.port} is listening` : `Port ${app.port} is not listening`,
+      suggestedAction: portListening ? undefined : 'Check if application started correctly',
     });
 
-    // Step 3: Listener address
+    // Step 3: Listener address (binding class)
     const listeners = await this.osAdapter.listTcpListeners();
-    const listener = listeners.find((l: any) => l.localPort === app.port);
+    const listener = listeners.find((l: any) => l.localPort === app.port && l.protocol === 'TCP');
     let bindingClass: string = 'not_listening';
+    let listenerAddress: string = 'N/A';
     if (listener) {
-      if (listener.localAddress === '127.0.0.1' || listener.localAddress === '::1')
+      listenerAddress = listener.localAddress;
+      if (listener.localAddress === '127.0.0.1' || listener.localAddress === '::1') {
         bindingClass = 'loopback_only';
-      else if (listener.localAddress === '0.0.0.0' || listener.localAddress === '::')
+      } else if (listener.localAddress === '0.0.0.0' || listener.localAddress === '::') {
         bindingClass = 'all_interfaces';
-      else bindingClass = 'specific_lan';
+      } else {
+        bindingClass = 'specific_lan';
+      }
     }
     steps.push({
       id: 'binding',
       name: 'Listener Binding',
-      status: bindingClass !== 'loopback_only' ? 'pass' : 'fail',
-      detail: `Binding: ${bindingClass.replace('_', ' ')} (${listener?.localAddress || 'N/A'})`,
+      status:
+        bindingClass === 'loopback_only'
+          ? 'fail'
+          : bindingClass === 'not_listening'
+            ? 'fail'
+            : 'pass',
+      detail: `Binding: ${bindingClass.replace('_', ' ')} (${listenerAddress})`,
       suggestedAction:
         bindingClass === 'loopback_only'
           ? 'Configure app to listen on 0.0.0.0 or specific LAN IP'
-          : undefined,
+          : bindingClass === 'not_listening'
+            ? 'Start the application'
+            : undefined,
     });
 
     // Step 4: Local HTTP check
-    if (app.healthCheck.type === 'http') {
-      const health = await this.healthMonitor.checkNow(appId);
-      steps.push({
-        id: 'local_http',
-        name: 'Local HTTP Response',
-        status: health.localResponding ? 'pass' : 'fail',
-        detail: health.localResponding
-          ? `HTTP check passed (${health.latencyMs}ms)`
-          : 'HTTP check failed',
-        suggestedAction: !health.localResponding ? 'Check application logs for errors' : undefined,
-      });
-    } else {
-      steps.push({
-        id: 'local_http',
-        name: 'Local HTTP Response',
-        status: 'skipped',
-        detail: 'No HTTP health check configured',
-      });
+    let localHttpResult = {
+      localResponding: false,
+      latencyMs: undefined as number | undefined,
+      error: undefined as string | undefined,
+    };
+    if (app.healthCheck.type === 'http' || app.healthCheck.type === 'https') {
+      try {
+        const health = await this.healthMonitor.checkNow(appId);
+        localHttpResult = {
+          localResponding: health.localResponding,
+          latencyMs: health.latencyMs,
+          error: health.localResponding ? undefined : 'HTTP check failed',
+        };
+      } catch (err) {
+        localHttpResult = {
+          localResponding: false,
+          latencyMs: undefined,
+          error: err instanceof Error ? err.message : 'HTTP check failed',
+        };
+      }
     }
-
-    // Step 5: Network interface
-    const selectedInterface = this.networkManager.getSelectedInterface();
-    if (selectedInterface) {
-      const interfaces = await this.networkManager.listInterfaces();
-      const iface = interfaces.find((i: any) => i.name === selectedInterface);
-      steps.push({
-        id: 'interface',
-        name: 'Network Interface',
-        status: iface ? 'pass' : 'fail',
-        detail: iface
-          ? `${iface.name} (${iface.ipv4}/${iface.prefixLength}) - ${iface.networkProfile}`
-          : 'Selected interface not found',
-        suggestedAction: !iface ? 'Re-select network interface' : undefined,
-      });
-    } else {
-      steps.push({
-        id: 'interface',
-        name: 'Network Interface',
-        status: 'not_performed',
-        detail: 'No interface selected for LAN access',
-      });
-    }
-
-    // Step 6: Firewall rule
-    const policy = await this.securityPolicyManager.getAccessStatus(appId);
+    const httpConfigured = app.healthCheck.type === 'http' || app.healthCheck.type === 'https';
     steps.push({
-      id: 'firewall',
-      name: 'Firewall Rule',
-      status: policy.policy.mode === 'lan_enabled' ? 'pass' : 'not_performed',
-      detail:
-        policy.policy.mode === 'lan_enabled' ? 'Firewall rule active' : 'LAN access not enabled',
-      suggestedAction: policy.policy.mode !== 'lan_enabled' ? 'Enable LAN access' : undefined,
-    });
-
-    // Step 7: Local verification
-    steps.push({
-      id: 'local_verification',
-      name: 'Local LAN Verification',
-      status: policy.policy.lastVerification === 'local_ok' ? 'pass' : 'not_performed',
-      detail:
-        policy.policy.lastVerification === 'local_ok'
-          ? 'Local LAN reachability confirmed'
-          : 'Not verified',
+      id: 'local_http',
+      name: 'Local HTTP Response',
+      status: httpConfigured ? (localHttpResult.localResponding ? 'pass' : 'fail') : 'skipped',
+      detail: httpConfigured
+        ? localHttpResult.localResponding
+          ? `HTTP check passed (${localHttpResult.latencyMs}ms)`
+          : `HTTP check failed${localHttpResult.error ? `: ${localHttpResult.error}` : ''}`
+        : 'No HTTP health check configured',
       suggestedAction:
-        policy.policy.lastVerification !== 'local_ok' ? 'Run verification' : undefined,
+        httpConfigured && !localHttpResult.localResponding
+          ? 'Check application logs for errors; verify health check path and expected status'
+          : undefined,
     });
 
-    // Step 8: Remote verification
-    steps.push({
-      id: 'remote_verification',
-      name: 'Remote Verification',
-      status: policy.policy.lastVerification === 'remote_user_confirmed' ? 'pass' : 'not_performed',
-      detail:
-        policy.policy.lastVerification === 'remote_user_confirmed'
-          ? 'Confirmed by remote user'
-          : 'Not confirmed (requires manual test from another device)',
-    });
-
-    // Step 9: External factors
-    steps.push({
-      id: 'external',
-      name: 'External Factors',
-      status: 'not_performed',
-      detail:
-        'Client isolation, VPN, other firewalls, router guest networks may affect connectivity',
-      suggestedAction: 'Verify from another device on the same network',
-    });
-
+    // Summary (only for steps 1-4 per brief)
     const summary = {
       passed: steps.filter((s) => s.status === 'pass').length,
       failed: steps.filter((s) => s.status === 'fail').length,
@@ -187,8 +151,15 @@ export class DiagnosticsService {
     };
   }
 
-  private async getRuntimeState(appId: string): Promise<any> {
-    // This would use RuntimeStateRepository
-    return null;
+  private async checkProcessRunning(appId: string, runtimeState: any): Promise<boolean> {
+    if (!runtimeState || !runtimeState.pid) {
+      return false;
+    }
+    try {
+      const processInfo = await this.osAdapter.getProcessInfo(runtimeState.pid);
+      return processInfo !== null && processInfo.startTime === runtimeState.processStartTime;
+    } catch {
+      return false;
+    }
   }
 }

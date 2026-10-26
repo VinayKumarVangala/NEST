@@ -86,6 +86,8 @@ export class ApplicationManager {
   private portGuard: PortGuard;
   private healthMonitor: any;
   private portManager: any;
+  private securityPolicyManager: any;
+  private networkManager: any;
   private mutex = new AppMutex();
   private isQuitting = false;
   private externalMonitorInterval: ReturnType<typeof setInterval> | null = null;
@@ -96,7 +98,9 @@ export class ApplicationManager {
     settings: any,
     portGuard: PortGuard = new NoOpPortGuardImpl(),
     healthMonitor: any = null,
-    portManager: any = null
+    portManager: any = null,
+    securityPolicyManager: any = null,
+    networkManager: any = null
   ) {
     this.osAdapter = osAdapter;
     this.eventBus = eventBus;
@@ -112,6 +116,8 @@ export class ApplicationManager {
     this.portGuard = portGuard;
     this.healthMonitor = healthMonitor;
     this.portManager = portManager;
+    this.securityPolicyManager = securityPolicyManager;
+    this.networkManager = networkManager;
   }
 
   private validateTransition(from: ProcessState, to: ProcessState): void {
@@ -183,6 +189,35 @@ export class ApplicationManager {
     // Validate config
     if (!app.workingDirectory) throw this.createError('VALIDATION', 'Working directory not set');
 
+    // Check binding class for LAN eligibility
+    const bindingClass = await this.portManager.computeBindingClass(app.port);
+    const networkManager = (this as any).networkManager;
+    const selectedInterfaceIp = networkManager?.getSelectedInterfaceInfo
+      ? (await networkManager.getSelectedInterfaceInfo())?.ipv4
+      : undefined;
+
+    // Check if app wants LAN access and needs binding class change
+    const needsLanProfile =
+      app.lanLaunchProfile &&
+      (bindingClass === 'loopback_only' ||
+        (bindingClass === 'specific_lan' &&
+          selectedInterfaceIp &&
+          bindingClass === 'specific_lan'));
+
+    // Check if app wants LAN access
+    const accessPolicy = await this.securityPolicyManager?.getAccessStatus(id);
+    const wantsLanAccess =
+      accessPolicy?.policy?.mode === 'lan_enabled' ||
+      (this.networkManager && this.networkManager.getSelectedInterface());
+
+    if (wantsLanAccess && bindingClass === 'loopback_only' && !app.lanLaunchProfile) {
+      throw this.createError(
+        'LOOPBACK_ONLY',
+        'Changing the firewall cannot fix a service listening only on 127.0.0.1. ' +
+          'Define a lanLaunchProfile with args like --host 0.0.0.0 or HOST=0.0.0.0 to enable LAN access.'
+      );
+    }
+
     // Port pre-check via PortGuard
     const portCheck = await this.portGuard.checkPort(app.port);
     if (!portCheck.available) {
@@ -190,6 +225,19 @@ export class ApplicationManager {
         port: app.port,
       });
     }
+
+    // Determine if we need to use LAN launch profile
+    const useLanProfile =
+      app.lanLaunchProfile &&
+      (bindingClass === 'loopback_only' ||
+        (bindingClass === 'specific_lan' && app.selectedInterface));
+
+    // Prepare environment and args
+    let finalArgs = app.args;
+    let finalEnv = { ...app.env.reduce((acc, e) => ({ ...acc, [e.key]: e.value }), {}) };
+
+    // Check if we should use LAN launch profile
+    const useLanLaunchProfile = app.lanLaunchProfile && wantsLanAccess;
 
     // Update state to starting
     const now = Date.now();
@@ -215,12 +263,31 @@ export class ApplicationManager {
         env[e.key] = e.value;
       }
 
+      // Use LAN launch profile if available and needed
+      let finalArgs = app.args;
+      let finalEnv: Record<string, string> = {
+        ...app.env.reduce((acc, e) => ({ ...acc, [e.key]: e.value }), {}),
+      };
+
+      if (useLanLaunchProfile && app.lanLaunchProfile) {
+        // Apply LAN launch profile args
+        finalArgs = [...app.lanLaunchProfile.args, ...app.args];
+        // Apply LAN launch profile env vars
+        for (const e of app.lanLaunchProfile.env) {
+          finalEnv[e.key] = e.value;
+        }
+        this.emitAppLog(id, 'info', 'Starting with LAN launch profile', {
+          args: app.lanLaunchProfile.args,
+          env: app.lanLaunchProfile.env,
+        });
+      }
+
       // Spawn process
       const { pid, startTime, child } = await this.osAdapter.spawnProcess({
         executable: resolved.path,
-        args: [...resolved.args, ...app.args],
+        args: [...resolved.args, ...finalArgs],
         workingDirectory: app.workingDirectory,
-        env,
+        env: finalEnv,
       });
 
       // Store process reference

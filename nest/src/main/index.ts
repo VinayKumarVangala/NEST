@@ -260,7 +260,8 @@ async function initializeApp(): Promise<void> {
     osAdapter,
     eventBus,
     networkManager,
-    applicationManager
+    applicationManager,
+    portManager
   );
   diagnosticsService = new DiagnosticsService(
     osAdapter,
