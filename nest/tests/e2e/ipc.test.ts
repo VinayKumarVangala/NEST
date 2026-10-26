@@ -20,11 +20,12 @@ test.describe('IPC Layer', () => {
 
   test('renderer cannot access ipcRenderer', async ({ page }) => {
     const hasIpcRenderer = await page.evaluate(() => {
-      // @ts-ignore
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const win = window as any;
       return (
         typeof require === 'function' ||
         typeof process !== 'undefined' ||
-        typeof ipcRenderer !== 'undefined'
+        typeof win.ipcRenderer !== 'undefined'
       );
     });
     expect(hasIpcRenderer).toBe(false);

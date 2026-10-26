@@ -2,16 +2,20 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { nest } from '@renderer/lib/ipc';
-import type { ApplicationConfig } from '@shared/types';
+import type { ApplicationConfig, RuntimeState, AccessPolicy } from '@shared/types';
 import { ConfirmDialog } from '@renderer/components/ConfirmDialog';
 import { RegistrationWizard } from '@renderer/components/RegistrationWizard';
-import { FolderPicker } from '@renderer/components/FolderPicker';
+import { AppCard } from '@renderer/components/ui/AppCard';
+import { Button } from '@renderer/components/ui/Button';
+import { useToast } from '@renderer/hooks/useToast';
 
 export function Projects() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [showWizard, setShowWizard] = useState(false);
   const [selectedAppForRemoval, setSelectedAppForRemoval] = useState<string | null>(null);
+  const [expandedApp, setExpandedApp] = useState<string | null>(null);
 
   const { data: apps, isLoading } = useQuery<ApplicationConfig[]>({
     queryKey: ['apps'],
@@ -39,9 +43,94 @@ export function Projects() {
     },
   });
 
+  const startMutation = useMutation({
+    mutationFn: (id: string) => nest.apps.start(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['apps', 'runtime'] }),
+  });
+
+  const stopMutation = useMutation({
+    mutationFn: (id: string) => nest.apps.stop(id, false),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['apps', 'runtime'] }),
+  });
+
+  const restartMutation = useMutation({
+    mutationFn: (id: string) => nest.apps.restart(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['apps', 'runtime'] }),
+  });
+
+  const enableLANMutation = useMutation({
+    mutationFn: (id: string) => nest.access.enable(id, 'I understand the risks'),
+    onSuccess: (result, id) => {
+      if (result.ok) {
+        queryClient.invalidateQueries({ queryKey: ['apps', 'access', id] });
+        toast({ title: 'LAN Access Enabled', message: `LAN access enabled for application`, variant: 'success' });
+      } else {
+        toast({ title: 'Failed', message: result.error.message, variant: 'destructive' });
+      }
+    },
+    onError: (err) => toast({ title: 'Error', message: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' }),
+  });
+
+  const disableLANMutation = useMutation({
+    mutationFn: (id: string) => nest.access.disable(id, true),
+    onSuccess: (result) => {
+      if (result.ok) {
+        queryClient.invalidateQueries({ queryKey: ['apps', 'access'] });
+        toast({ title: 'LAN Access Disabled', message: 'LAN access has been disabled', variant: 'success' });
+      } else {
+        toast({ title: 'Failed', message: result.error.message, variant: 'destructive' });
+      }
+    },
+    onError: (err) => toast({ title: 'Error', message: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' }),
+  });
+
   const handleViewDetails = (appId: string) => {
     navigate(`/projects/${appId}`);
   };
+
+  const handleOpenBrowser = (url: string) => {
+    window.open(url, '_blank');
+  };
+
+  // Fetch runtime states and access policies for all apps
+  const { data: runtimeStates } = useQuery({
+    queryKey: ['apps', 'runtime'],
+    queryFn: async () => {
+      const results: Record<string, RuntimeState> = {};
+      if (!apps) return results;
+      for (const app of apps) {
+        // Runtime state would be fetched from a separate endpoint or embedded in the app list
+        // For now, use a default state
+        results[app.id] = {
+          appId: app.id,
+          processState: 'unknown',
+          healthState: 'unknown',
+          portState: 'unknown',
+          updatedAt: Date.now(),
+        };
+      }
+      return results;
+    },
+    enabled: !!apps && apps.length > 0,
+    refetchInterval: 5000,
+  });
+
+  const { data: accessPolicies } = useQuery({
+    queryKey: ['apps', 'access'],
+    queryFn: async () => {
+      const results: Record<string, { policy: AccessPolicy; bindingClass: string; lanUrl?: string; isLanEligible: boolean }> = {};
+      if (!apps) return results;
+      for (const app of apps) {
+        const result = await nest.access.getStatus(app.id);
+        if (result.ok) {
+          results[app.id] = result.data;
+        }
+      }
+      return results;
+    },
+    enabled: !!apps && apps.length > 0,
+    refetchInterval: 10000,
+  });
 
   if (isLoading) {
     return (
@@ -55,12 +144,9 @@ export function Projects() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Projects</h1>
-        <button
-          onClick={() => setShowWizard(true)}
-          className="px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors"
-        >
+        <Button onClick={() => setShowWizard(true)} variant="primary">
           Register Application
-        </button>
+        </Button>
       </div>
 
       {showWizard && (
@@ -78,84 +164,50 @@ export function Projects() {
         />
       )}
 
-      <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-        {apps?.length === 0 ? (
-          <div className="p-12 text-center">
-            <div className="text-4xl mb-4">📦</div>
-            <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
-              No applications registered
-            </h3>
-            <p className="text-slate-500 dark:text-slate-400 mb-4">
-              Click 'Register Application' to get started
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-200 dark:divide-slate-700">
-            {apps?.map((app) => (
-              <ProjectRow
+      {apps?.length === 0 ? (
+        <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-12 text-center">
+          <div className="text-4xl mb-4">📦</div>
+          <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
+            No applications registered
+          </h3>
+          <p className="text-slate-500 dark:text-slate-400 mb-4">
+            Click 'Register Application' to get started
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {apps?.map((app) => {
+            const runtimeState = runtimeStates?.[app.id];
+            const accessData = accessPolicies?.[app.id];
+            const bindingClass = accessData?.bindingClass as
+              | 'loopback_only'
+              | 'all_interfaces'
+              | 'specific_lan'
+              | 'not_listening'
+              | undefined;
+            return (
+              <AppCard
                 key={app.id}
                 app={app}
+                runtimeState={runtimeState}
+                accessPolicy={accessData?.policy}
+                bindingClass={bindingClass}
+                lanUrl={accessData?.lanUrl}
+                isLanEligible={accessData?.isLanEligible}
+                onStart={startMutation.mutate}
+                onStop={(id) => stopMutation.mutate(id)}
+                onRestart={(id) => restartMutation.mutate(id)}
                 onRemove={setSelectedAppForRemoval}
-                onView={handleViewDetails}
+                onOpenDetails={handleViewDetails}
+                onEnableLAN={enableLANMutation.mutate}
+                onDisableLAN={disableLANMutation.mutate}
+                onViewLogs={() => navigate(`/projects/${app.id}?tab=logs`)}
+                onOpenBrowser={handleOpenBrowser}
               />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ProjectRow({
-  app,
-  onRemove,
-  onView,
-}: {
-  app: ApplicationConfig;
-  onRemove: (id: string) => void;
-  onView: (id: string) => void;
-}) {
-  const [confirmRemove, setConfirmRemove] = useState(false);
-
-  return (
-    <div className="p-4 flex items-center justify-between">
-      <div
-        className="flex-1 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
-        onClick={() => onView(app.id)}
-      >
-        <h3 className="font-medium text-slate-900 dark:text-white">{app.name}</h3>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          {app.executable} {app.args.join(' ')}
-        </p>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          Port: {app.port} • {app.protocol}://localhost:{app.port}
-        </p>
-      </div>
-      <div className="flex items-center gap-2">
-        {confirmRemove ? (
-          <>
-            <button
-              onClick={() => onRemove(app.id)}
-              className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-            >
-              Confirm
-            </button>
-            <button
-              onClick={() => setConfirmRemove(false)}
-              className="px-3 py-1.5 text-sm bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300 rounded hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-            >
-              Cancel
-            </button>
-          </>
-        ) : (
-          <button
-            onClick={() => setConfirmRemove(true)}
-            className="px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-          >
-            Remove
-          </button>
-        )}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

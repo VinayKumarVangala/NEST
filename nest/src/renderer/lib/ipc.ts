@@ -80,6 +80,12 @@ export const nest = {
       api.access.enable(appId, confirmation) as Promise<Result<any>>,
     disable: (appId: string, restartWithLocalProfile?: boolean) =>
       api.access.disable(appId, restartWithLocalProfile) as Promise<Result<AccessPolicy>>,
+    workflow: {
+      start: (appId: string) => api.access.workflow.start(appId) as Promise<Result<any>>,
+      step: (appId: string, step: number, payload?: Record<string, unknown>) =>
+        api.access.workflow.step(appId, step, payload) as Promise<Result<any>>,
+      status: (appId: string) => api.access.workflow.status(appId) as Promise<Result<any>>,
+    },
   },
 
   health: {
