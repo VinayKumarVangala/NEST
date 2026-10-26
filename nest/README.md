@@ -1,138 +1,60 @@
-# NEST — Local Network Application Host
+# NEST
 
-NEST is a desktop application for managing and exposing local network services. It helps you run, monitor, and expose local development servers (Node.js, Python, .NET, Java, etc.) on your local network with proper firewall management, health monitoring, and diagnostics.
+**Host on your network.**
 
-## Features
+NEST is a Windows-first desktop application for managing development application lifecycles and enabling controlled access to those applications across a local network.
 
-- **Process Management**: Start, stop, restart, and monitor local applications
-- **Health Monitoring**: TCP, HTTP/HTTPS health checks with configurable intervals
-- **Port Management**: Automatic port conflict detection and resolution
-- **Network Access**: Controlled LAN exposure with Windows Firewall integration
-- **Diagnostics**: Comprehensive health and connectivity diagnostics
-- **Log Management**: Structured logging with redaction, filtering, and export
-- **Auto-Restart**: Configurable exponential backoff restart policies
-- **System Tray**: Background operation with tray menu
+## What NEST Does
+
+- **Register** applications built with any language/framework (Node.js, Python, Java, .NET, Go, Rust, etc.)
+- **Manage** process lifecycle: start, stop, restart, crash detection, auto-restart
+- **Monitor** health via TCP/HTTP checks with configurable intervals
+- **Expose** applications to LAN with explicit user consent and firewall management
+- **Diagnose** connectivity issues with a guided 9-step diagnostic tool
+
+## What NEST Does NOT Do
+
+- ❌ **Does not** host applications publicly on the internet
+- ❌ **Does not** provide reverse proxy, custom DNS, or hostname routing
+- ❌ **Does not** automatically modify application source code
+- ❌ **Does not** run applications in containers/VMs
+- ❌ **Does not** guarantee LAN accessibility (depends on app binding, firewall, network)
+- ❌ **Does not** override OS/network security policies
 
 ## Quick Start
 
-### Prerequisites
-
-- Node.js 20+
-- Windows 10/11 (primary target)
-- Electron 28+
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/nest.git
-cd nest
-
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-```
-
-### Building
-
-```bash
-# Build for production
-npm run build
-
-# Create Windows installer
-npm run make
-```
+1. Download and run `NEST-Setup.exe`
+2. Click "Register Application"
+3. Fill in your app details (path, command, port)
+4. Click "Start" to run your app
+5. (Optional) Click "Enable LAN Access" to share on local network
 
 ## Documentation
 
-- [Setup Guide](docs/setup.md) - Installation and configuration
-- [Behavior Reference](docs/behavior.md) - Application behaviors and policies
-- [API Reference](docs/api.md) - IPC contracts and types
+| Guide | Description |
+|-------|-------------|
+| [User Guide](docs/user-guide.md) | Registering apps, managing lifecycle, LAN access |
+| [LAN Access](docs/lan-access.md) | Binding rules, firewall, network troubleshooting |
+| [Troubleshooting](docs/troubleshooting.md) | Diagnostic steps, common issues |
+| [Security](docs/security.md) | Invariants, what NEST will never do |
+| [Behavior](docs/behavior.md) | Close/exit/reboot semantics |
+| [Known Limitations](docs/known-limitations.md) | From brief §15 |
+| [Release Notes](docs/release-notes.md) | Version history |
 
-## Project Structure
+## Requirements
 
-```
-nest/
-├── src/
-│   ├── main/                 # Main process (Electron)
-│   │   ├── services/         # Business logic services
-│   │   ├── ipc/             # IPC handlers
-│   │   ├── db/              # Database layer
-│   │   └── os/              # OS-specific adapters
-│   ├── preload/             # Preload script
-│   ├── renderer/            # React UI
-│   │   ├── features/        # Feature modules
-│   │   ├── components/      # Reusable components
-│   │   ├── hooks/           # Custom hooks
-│   │   └── lib/             # Utilities
-│   └── shared/              # Shared types, schemas, IPC contracts
-├── resources/               # Icons, assets
-├── docs/                    # Documentation
-└── tests/                   # Unit and integration tests
-```
+- Windows 10 21H2+ or Windows 11
+- Network profile set to **Private** (for LAN access)
+- Administrator rights for firewall changes (UAC prompt)
 
-## Development
+## Security First
 
-### Commands
-
-```bash
-npm run dev          # Start development (main + renderer)
-npm run build        # Build all targets
-npm run lint         # Run ESLint
-npm run typecheck    # TypeScript type checking
-npm run test         # Run unit tests
-npm run test:e2e     # Run Playwright E2E tests
-```
-
-## Architecture
-
-### Main Process Services
-
-| Service               | Responsibility                                |
-| --------------------- | --------------------------------------------- |
-| ApplicationManager    | Process lifecycle, supervision, recovery      |
-| HealthMonitor         | Health checks (TCP, HTTP), failure thresholds |
-| PortManager           | Port checking, allocation, conflict detection |
-| NetworkManager        | Network interfaces, profiles, selection       |
-| SecurityPolicyManager | Firewall rules, LAN access policies           |
-| DiagnosticsService    | Comprehensive diagnostics                     |
-| LoggingService        | Structured logging, redaction, retention      |
-| PortManager           | Port checking, allocation, conflict detection |
-
-### IPC Communication
-
-All communication between renderer and main process goes through typed IPC channels defined in `src/shared/ipc-contract.ts`.
-
-### Database
-
-SQLite (better-sqlite3) with WAL mode. Schema migrations on startup.
-
-## Configuration
-
-Settings stored in SQLite `settings` table:
-
-```json
-{
-  "backgroundMode": true,
-  "shutdownPolicy": "ask",
-  "startupAtLogin": false,
-  "logRetentionDays": 30,
-  "logMaxLinesPerApp": 5000
-}
-```
-
-## Security
-
-- Context isolation enabled
-- Node integration disabled
-- Sandbox enabled
-- No shell command execution from user input
-- Secrets encrypted with Electron safeStorage
-- Logs redacted at writer boundary
-- Default LAN access: disabled (opt-in only)
+- **Local-only by default** — no network exposure without explicit consent
+- **No admin required for install** — per-user install to `%LOCALAPPDATA%`
+- **Firewall rules scoped** — Private profile only, `LocalSubnet` only, `NEST-` prefix
+- **No secrets in logs** — automatic redaction of tokens, passwords, keys
+- **Code signing** — CI/CD builds signed via `CSC_LINK`/`CSC_KEY_PASSWORD`
 
 ## License
 
-MIT
+MIT License — see [LICENSE](LICENSE)
