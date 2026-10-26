@@ -86,6 +86,14 @@ vi.mock('better-sqlite3', () => {
 
 // Mock node:fs for tests
 vi.mock('node:fs', () => ({
+  default: {
+    existsSync: vi.fn().mockReturnValue(true),
+    mkdirSync: vi.fn(),
+    readFileSync: vi.fn().mockReturnValue(''),
+    writeFileSync: vi.fn(),
+    readdirSync: vi.fn().mockReturnValue([]),
+    statSync: vi.fn().mockReturnValue({ isDirectory: () => true, isFile: () => false }),
+  },
   existsSync: vi.fn().mockReturnValue(true),
   mkdirSync: vi.fn(),
   readFileSync: vi.fn().mockReturnValue(''),
@@ -96,6 +104,13 @@ vi.mock('node:fs', () => ({
 
 // Mock node:path
 vi.mock('node:path', () => ({
+  default: {
+    join: vi.fn((...args) => args.join('/')),
+    resolve: vi.fn((...args) => args.join('/')),
+    dirname: vi.fn((p) => p.split('/').slice(0, -1).join('/')),
+    basename: vi.fn((p) => p.split('/').pop()),
+    extname: vi.fn((p) => '.' + p.split('.').pop()),
+  },
   join: vi.fn((...args) => args.join('/')),
   resolve: vi.fn((...args) => args.join('/')),
   dirname: vi.fn((p) => p.split('/').slice(0, -1).join('/')),

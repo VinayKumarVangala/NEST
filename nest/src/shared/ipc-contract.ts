@@ -274,10 +274,28 @@ export const EventChannels = {
     interfaces: z.array(NetworkInterfaceInfoSchema),
     selectedInterface: z.string().optional(),
     timestamp: z.number().int().positive(),
+    diff: z.object({
+      ipChanged: z.boolean().optional(),
+      previousIp: z.string().optional(),
+      currentIp: z.string().optional(),
+      interfacesChanged: z.boolean().optional(),
+      added: z.array(NetworkInterfaceInfoSchema).optional(),
+      removed: z.array(NetworkInterfaceInfoSchema).optional(),
+      changed: z.array(NetworkInterfaceInfoSchema).optional(),
+    }).optional(),
   }) as z.ZodType<{
     interfaces: NetworkInterfaceInfo[];
     selectedInterface?: string;
     timestamp: number;
+    diff?: {
+      ipChanged?: boolean;
+      previousIp?: string;
+      currentIp?: string;
+      interfacesChanged?: boolean;
+      added?: NetworkInterfaceInfo[];
+      removed?: NetworkInterfaceInfo[];
+      changed?: NetworkInterfaceInfo[];
+    };
   }>,
   'network.staleUrl': z.object({
     appId: uuidSchema,
@@ -322,6 +340,11 @@ export const EventChannels = {
     action: string;
     ruleName?: string;
     error?: AppError;
+    timestamp: number;
+  }>,
+  'system.resume': z.object({
+    timestamp: z.number().int().positive(),
+  }) as z.ZodType<{
     timestamp: number;
   }>,
 } as const;

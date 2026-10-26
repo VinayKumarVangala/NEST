@@ -1,0 +1,15 @@
+{
+  "name": "nest-test-apps",
+  "version": "1.0.0",
+  "description": "Controlled test applications for NEST stress/soak testing",
+  "main": "index.js",
+  "scripts": {
+    "loopback": "node loopback-server.js",
+    "lan": "node lan-server.js",
+    "slow-start": "node slow-start-server.js",
+    "crashy": "node crashy-server.js",
+    "child-spawner": "node child-spawner.js"
+  },
+  "keywords": ["test", "fixtures", "nest"],
+  "license": "MIT"
+}

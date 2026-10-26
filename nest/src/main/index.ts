@@ -11,6 +11,7 @@ import {
   Menu,
   nativeImage,
   dialog,
+  powerMonitor,
 } from 'electron';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -299,6 +300,73 @@ async function initializeApp(): Promise<void> {
   // Start monitors
   healthMonitor.start();
   networkManager.start();
+
+  // Power monitor for sleep/resume handling
+  let isSuspending = false;
+
+  powerMonitor.on('suspend', () => {
+    isSuspending = true;
+    console.log('[PowerMonitor] System suspending...');
+    
+    // Stop health monitoring to prevent false failures
+    healthMonitor.stop();
+    
+    // Stop network polling
+    networkManager.stop();
+    
+    // Stop external monitoring
+    applicationManager.stopExternalMonitoring();
+  });
+
+  powerMonitor.on('resume', async () => {
+    console.log('[PowerMonitor] System resuming...');
+    isSuspending = false;
+    
+    // Give the system a moment to restore network
+    await new Promise(r => setTimeout(r, 2000));
+    
+    // Re-reconcile network state
+    try {
+      await networkManager.reconcile();
+    } catch (error) {
+      console.error('[PowerMonitor] Network reconciliation failed:', error);
+    }
+    
+    // Re-reconcile processes and ports
+    try {
+      await applicationManager.recover();
+    } catch (error) {
+      console.error('[PowerMonitor] Process recovery failed:', error);
+    }
+    
+    // Restart monitors
+    healthMonitor.start();
+    networkManager.start();
+    
+    // Restart external monitoring
+    applicationManager.startExternalMonitoring();
+    
+    // Run diagnostics on all managed apps to verify health
+    const apps = applicationManager.getAllRunningApps();
+    for (const { config } of apps) {
+      try {
+        await diagnosticsService.runDiagnostics(config.id);
+      } catch (error) {
+        console.error(`[PowerMonitor] Diagnostics failed for ${config.id}:`, error);
+      }
+    }
+    
+    // Emit system resume event for UI
+    eventBus.emit('system.resume', { timestamp: Date.now() });
+  });
+
+  powerMonitor.on('lock-screen', () => {
+    console.log('[PowerMonitor] Screen locked');
+  });
+
+  powerMonitor.on('unlock-screen', () => {
+    console.log('[PowerMonitor] Screen unlocked');
+  });
 
   // Handle shutdown policy
   app.on('before-quit', async (event) => {

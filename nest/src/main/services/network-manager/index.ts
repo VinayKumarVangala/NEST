@@ -164,6 +164,15 @@ export class NetworkManager {
     }
   }
 
+  /**
+   * Reconcile network state after system resume
+   * Triggers a full network state recomputation and emits change events
+   */
+  async reconcile(): Promise<void> {
+    const interfaces = await this.listInterfaces();
+    this.emitNetworkChanged(interfaces, this.selectedInterface);
+  }
+
   // Get the currently selected interface info
   async getSelectedInterfaceInfo(): Promise<NetworkInterfaceInfo | null> {
     if (!this.selectedInterface) return null;
