@@ -59,6 +59,17 @@ const config: ForgeConfig = {
     // Code signing configuration via environment variables
     // CSC_LINK (URL to .pfx) and CSC_KEY_PASSWORD for CI/CD
     // Unsigned builds allowed when CSC_LINK is not set (dev)
+    // See: https://www.electron.build/code-signing
+    // CSC_LINK: URL to the code signing certificate (.pfx file) hosted on a file server
+    // CSC_KEY_PASSWORD: Password for the code signing certificate
+    // To build unsigned (dev): omit CSC_LINK
+    // To build signed (CI/CD): set CSC_LINK and CSC_KEY_PASSWORD
+    // Set product name for installer
+    name: 'NEST',
+    // Set product version from package.json (auto-populated)
+    // Set copyright
+    appCopyright: 'Copyright © 2024 NEST Contributors',
+    // Set file version and product version from package.json
   },
   rebuildConfig: {},
   makers: [
@@ -71,6 +82,12 @@ const config: ForgeConfig = {
       // Squirrel handles per-user by default, no admin required
       // Upgrade path: Squirrel handles delta updates, preserves user data
       // Uninstall: Squirrel offers cleanup but we add custom handler for firewall rules
+      // Set the app name for the installer
+      setupExe: 'NEST-Setup.exe',
+      // Set the exe name
+      exe: 'NEST.exe',
+      // Options for Squirrel
+      // setupExe is the output name
     }),
     new MakerZIP({}, ['win32']),
   ],

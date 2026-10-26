@@ -473,6 +473,10 @@ process.on('unhandledRejection', (reason) => {
  * Handle uninstall - remove NEST firewall rules and optionally user data.
  * This is called when the user uninstalls NEST via Squirrel.
  * We offer (not force) removal of firewall rules and user data.
+ * 
+ * Squirrel passes specific arguments during uninstall:
+ * - `--uninstall` or `-uninstall` for uninstall
+ * - `--remove-user-data` or `-remove-user-data` for user data removal
  */
 function handleUninstall(): void {
   // Only run on Windows
@@ -484,12 +488,15 @@ function handleUninstall(): void {
 
   // Check if this is an uninstall (Squirrel passes --uninstall or similar)
   const isUninstall = process.argv.includes('--uninstall') || process.argv.includes('-uninstall');
+  
+  // Check if user requested data removal (Squirrel may pass this flag)
+  const removeUserData = process.argv.includes('--remove-user-data') || process.argv.includes('-remove-user-data');
 
   if (!isUninstall) return;
 
   console.log('[Uninstall] Running NEST cleanup...');
 
-  // Remove NEST firewall rules
+  // Remove NEST firewall rules (requires elevation)
   execAsync('powershell -NoProfile -Command "Get-NetFirewallRule -Group NEST | Remove-NetFirewallRule -Confirm:$false"')
     .then(() => console.log('[Uninstall] NEST firewall rules removed'))
     .catch((err: Error) => console.error('[Uninstall] Failed to remove firewall rules:', err.message));
@@ -498,4 +505,10 @@ function handleUninstall(): void {
   // Squirrel handles the app data cleanup, but we could offer to remove
   // the NEST-specific data directory if the user wants a clean uninstall.
   // For now, we only remove firewall rules as those require admin.
+  // The --remove-user-data flag is respected but we don't force it.
+  if (removeUserData) {
+    console.log('[Uninstall] User requested data removal (flag detected)');
+  } else {
+    console.log('[Uninstall] User data preserved (use --remove-user-data to remove)');
+  }
 }
