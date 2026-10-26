@@ -105,6 +105,10 @@ async function createWindow(): Promise<void> {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
     await mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
+    // Disable DevTools in production
+    mainWindow.webContents.on('devtools-opened', () => {
+      if (mainWindow) mainWindow.webContents.closeDevTools();
+    });
   }
 
   mainWindow.once('ready-to-show', () => {

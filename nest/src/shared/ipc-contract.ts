@@ -68,6 +68,7 @@ export type {
   AutoRestartPolicy,
   RestartHistoryEntry,
 };
+export { AppsCreateRequestSchema };
 
 /** Request payload schemas (separate from full config schemas) */
 const AppsCreateRequestSchema = z.object({
